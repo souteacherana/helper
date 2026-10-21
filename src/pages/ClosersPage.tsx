@@ -1,18 +1,17 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { BadgePill } from '../components/BadgePill';
 import { Avatar } from '../components/Avatar';
 import {
   Search,
-  CheckCircle2,
   MessageCircle,
-  UserCheck,
   RotateCw,
+  SlidersHorizontal,
+  X,
   ChevronDown,
   ChevronUp,
   Send,
-  Sparkles,
   Phone,
   ExternalLink,
   BookOpen,
@@ -21,8 +20,17 @@ import {
   CreditCard,
   Gift
 } from 'lucide-react';
-import type { BadgeLevel } from '../types/index';
 import { getBadgeLevel } from '../types/index';
+import { FilterSheet } from '../components/FilterSheet';
+import {
+  EMPTY_FILTERS,
+  FILTER_PRESETS,
+  activeFilterChips,
+  loadFilters,
+  matchesFilters,
+  saveFilters,
+  type CloserFilters
+} from '../lib/closerFilters';
 import { buildWhatsAppUrl, formatCheckInTime, formatDateBR, matchesQuery } from '../lib/format';
 import { EVENT_DAYS, currentEventDay } from '../lib/eventDays';
 
@@ -38,11 +46,16 @@ export const ClosersPage: React.FC = () => {
   const { attendees, addCloserNote, userSession } = useApp();
 
   const [search, setSearch] = useState('');
-  const [badgeFilter, setBadgeFilter] = useState<'ALL' | BadgeLevel>('ALL');
-  const [presentOnly, setPresentOnly] = useState(false);
-  const [menteeOnly, setMenteeOnly] = useState(false);
-  const [nonMenteeVipOnly, setNonMenteeVipOnly] = useState(false);
-  const [renewalOnly, setRenewalOnly] = useState(false);
+  // Filtros ficam lembrados neste aparelho
+  const [filters, setFilters] = useState<CloserFilters>(loadFilters);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  useEffect(() => saveFilters(filters), [filters]);
+  const closeFilters = useCallback(() => setFiltersOpen(false), []);
+  const chips = activeFilterChips(filters);
+  const clearAll = () => {
+    setFilters(EMPTY_FILTERS);
+    setSearch('');
+  };
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -53,6 +66,7 @@ export const ClosersPage: React.FC = () => {
     if (!focusId) return;
     const target = attendees.find(a => a.id === focusId);
     if (!target) return;
+    setFilters(EMPTY_FILTERS);
     setSearch(target.name);
     setExpandedId(target.id);
     setSearchParams({}, { replace: true });
@@ -67,23 +81,9 @@ export const ClosersPage: React.FC = () => {
         item.phone
       );
 
-      const calculatedBadge = getBadgeLevel(item);
-      const matchesBadge = badgeFilter === 'ALL' || calculatedBadge === badgeFilter;
-      const matchesPresent = !presentOnly || item.isPresent;
-      const matchesMentee = !menteeOnly || item.isMentee;
-      const matchesNonMenteeVip = !nonMenteeVipOnly || (item.level === 'VIP' && !item.isMentee);
-      const matchesRenewal = !renewalOnly || item.nearRenewal;
-
-      return (
-        matchesSearch &&
-        matchesBadge &&
-        matchesPresent &&
-        matchesMentee &&
-        matchesNonMenteeVip &&
-        matchesRenewal
-      );
+      return matchesSearch && matchesFilters(item, filters);
     });
-  }, [attendees, search, badgeFilter, presentOnly, menteeOnly, nonMenteeVipOnly, renewalOnly]);
+  }, [attendees, search, filters]);
 
   const toggleExpand = (id: string) => {
     setExpandedId(prev => (prev === id ? null : id));
@@ -116,130 +116,91 @@ export const ClosersPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Search & Swipeable Filter Controls Bar */}
+      {/* Busca + filtros */}
       <div className="space-y-2.5">
-        {/* Search Input */}
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Buscar por nome, telefone, instagram..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full bg-white border border-slate-300 rounded-xl pl-10 pr-10 py-3 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-900 transition shadow-sm"
-          />
-          {search && (
-            <button
-              onClick={() => setSearch('')}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-2.5 text-xs text-slate-400 hover:text-slate-700"
-            >
-              ✕
-            </button>
-          )}
+        <div className="flex gap-2">
+          <div className="relative flex-1 min-w-0">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Buscar por nome, telefone, instagram..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full bg-white border border-slate-300 rounded-xl pl-10 pr-10 py-3 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-900 transition shadow-sm"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-2.5 text-slate-400 hover:text-slate-700"
+                aria-label="Limpar busca"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => setFiltersOpen(true)}
+            className={`shrink-0 px-4 rounded-xl border text-sm font-bold flex items-center gap-2 transition shadow-sm ${
+              chips.length ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-300 text-slate-800 hover:bg-slate-50'
+            }`}
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            <span className="hidden sm:inline">Filtros</span>
+            {chips.length > 0 && (
+              <span className="min-w-5 h-5 px-1.5 rounded-full bg-white text-slate-900 text-[11px] font-black flex items-center justify-center">
+                {chips.length}
+              </span>
+            )}
+          </button>
         </div>
 
-        {/* Horizontally Scrollable Badge Filter Tabs */}
-        <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar py-0.5">
-          {(['ALL', 'VIP', 'SILVER', 'PATROCINADOR'] as const).map(lvl => (
-            <button
-              key={lvl}
-              onClick={() => setBadgeFilter(lvl)}
-              className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition shrink-0 ${
-                badgeFilter === lvl
-                  ? 'bg-slate-900 text-white shadow-sm'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              {lvl === 'ALL' ? 'Todos Crachás' : `Crachá ${lvl}`}
+        {chips.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {chips.map(chip => (
+              <button
+                key={chip.key}
+                onClick={() => setFilters(chip.remove(filters))}
+                className="pl-3 pr-2 py-1.5 rounded-full bg-slate-900/5 border border-slate-200 text-xs font-semibold text-slate-800 flex items-center gap-1 hover:bg-slate-900/10"
+                aria-label={`Remover filtro ${chip.label}`}
+              >
+                <span>{chip.label}</span>
+                <X className="w-3.5 h-3.5 text-slate-500" />
+              </button>
+            ))}
+            <button onClick={() => setFilters(EMPTY_FILTERS)} className="px-2 py-1.5 text-xs font-bold text-slate-500 hover:text-slate-900 underline">
+              Limpar tudo
             </button>
-          ))}
-        </div>
-
-        {/* Quick Toggles */}
-        <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar py-0.5 text-xs">
-          <button
-            onClick={() => setNonMenteeVipOnly(!nonMenteeVipOnly)}
-            className={`px-3 py-2.5 rounded-lg border flex items-center space-x-1.5 shrink-0 transition font-bold ${
-              nonMenteeVipOnly
-                ? 'bg-amber-100 text-amber-900 border-amber-300'
-                : 'bg-white text-slate-700 border-slate-200'
-            }`}
-            title="VIPs que ainda não são mentorados (Alvos para fechamento no Pitch)"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-            <span>🔥 VIPs Não-Mentorados</span>
-          </button>
-
-          <button
-            onClick={() => setPresentOnly(!presentOnly)}
-            className={`px-3 py-2.5 rounded-lg border flex items-center space-x-1.5 shrink-0 transition font-medium ${
-              presentOnly
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold'
-                : 'bg-white text-slate-600 border-slate-200'
-            }`}
-          >
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Presentes</span>
-          </button>
-
-          <button
-            onClick={() => setMenteeOnly(!menteeOnly)}
-            className={`px-3 py-2.5 rounded-lg border flex items-center space-x-1.5 shrink-0 transition font-medium ${
-              menteeOnly
-                ? 'bg-indigo-50 text-indigo-800 border-indigo-300 font-bold'
-                : 'bg-white text-slate-600 border-slate-200'
-            }`}
-          >
-            <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Já Mentorados</span>
-          </button>
-
-          <button
-            onClick={() => setRenewalOnly(!renewalOnly)}
-            className={`px-3 py-2.5 rounded-lg border flex items-center space-x-1.5 shrink-0 transition font-medium ${
-              renewalOnly
-                ? 'bg-rose-50 text-rose-800 border-rose-300 font-bold'
-                : 'bg-white text-slate-600 border-slate-200'
-            }`}
-          >
-            <RotateCw className="w-3.5 h-3.5 text-rose-600" />
-            <span>Renovação Próxima</span>
-          </button>
-
-          {(presentOnly || menteeOnly || nonMenteeVipOnly || renewalOnly || badgeFilter !== 'ALL' || search) && (
-            <button
-              onClick={() => {
-                setPresentOnly(false);
-                setMenteeOnly(false);
-                setNonMenteeVipOnly(false);
-                setRenewalOnly(false);
-                setBadgeFilter('ALL');
-                setSearch('');
-              }}
-              className="text-xs text-rose-600 hover:underline px-2 py-2.5 shrink-0 font-medium"
-            >
-              Resetar
-            </button>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 shrink-0">Atalhos</span>
+            {FILTER_PRESETS.map(p => (
+              <button
+                key={p.id}
+                onClick={() => setFilters(p.filters)}
+                className="shrink-0 px-3 py-2 rounded-full bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:border-slate-400"
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      <FilterSheet
+        open={filtersOpen}
+        filters={filters}
+        resultCount={attendees.filter(a => matchesFilters(a, filters)).length}
+        onChange={setFilters}
+        onClose={closeFilters}
+      />
 
       {/* Attendees List */}
       {filteredAttendees.length === 0 ? (
         <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center space-y-2">
           <p className="text-slate-500 text-sm">Nenhum participante encontrado com os filtros selecionados.</p>
-          <button
-            onClick={() => {
-              setSearch('');
-              setBadgeFilter('ALL');
-              setPresentOnly(false);
-              setMenteeOnly(false);
-              setNonMenteeVipOnly(false);
-              setRenewalOnly(false);
-            }}
-            className="text-xs text-slate-900 font-bold underline"
-          >
-            Limpar todos os filtros
+          <button onClick={clearAll} className="text-xs text-slate-900 font-bold underline py-2">
+            Limpar busca e filtros
           </button>
         </div>
       ) : (
@@ -280,16 +241,16 @@ export const ClosersPage: React.FC = () => {
                           </span>
                         </div>
 
-                        <div className="flex items-center space-x-2 text-xs">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
                           {item.isPresent ? (
-                            <span className="text-xs font-bold text-emerald-700">
+                            <span className="text-xs font-bold text-emerald-700 whitespace-nowrap">
                               Presente hoje {item.checkInTime && `(${formatCheckInTime(item.checkInTime)})`}
                             </span>
                           ) : (
                             <span className="text-xs font-medium text-slate-400">Ausente</span>
                           )}
                           <span className="text-slate-300">•</span>
-                          <span className="text-xs font-semibold text-slate-500">Ingresso: {item.level}</span>
+                          <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">Ingresso: {item.level}</span>
                         </div>
                       </div>
                     </div>

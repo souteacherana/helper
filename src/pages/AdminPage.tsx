@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import type { AccompaniedBy, Attendee, PaymentMethod, TicketLevel } from '../types/index';
 import { ShieldCheck, UserPlus, Trash2, Users, Plus, X, Pencil, Save, Search, ImageOff, RotateCcw, QrCode } from 'lucide-react';
 import { QrCodesPanel } from '../components/QrCodesPanel';
+import { PostEventExport } from '../components/PostEventExport';
 import { downloadBlob, isLocalAddress, publicSiteUrl, qrPngWithLabel, safeFileName } from '../lib/badgeQr';
 import { formatPhoneInput, formatCurrencyInput, matchesQuery } from '../lib/format';
 import { Avatar } from '../components/Avatar';
@@ -171,6 +172,8 @@ export const AdminPage: React.FC = () => {
       <SpreadsheetImport />
 
       <QrCodesPanel />
+
+      <PostEventExport />
 
       {/* Participantes */}
       <div

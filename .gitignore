@@ -28,3 +28,6 @@ dist-ssr
 
 # Planilhas com dados reais de participantes (não versionar)
 participantes_*.xlsx
+
+# Configuração local de ferramentas de desenvolvimento
+.claude/

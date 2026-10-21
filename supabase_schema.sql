@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS public.attendees (
 
   -- Acompanhante
   is_accompanied BOOLEAN DEFAULT FALSE,
-  accompanied_by TEXT CHECK (accompanied_by IN ('Esposo(a)', 'Professor parceiro', 'Colaborador', 'Amigo')),
+  accompanied_by TEXT CHECK (accompanied_by IN ('Esposo(a)', 'Familiar', 'Professor parceiro', 'Colaborador', 'Amigo')),
   companion_name TEXT,
 
   -- Situação de mentoria
@@ -414,3 +414,22 @@ REVOKE ALL ON FUNCTION public.reset_presence() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.reception_list() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.event_day() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.reset_presence() TO authenticated;
+
+-- ========================================================
+-- 8. Tipo de acompanhante "Familiar" (filho, irmã, pais...)
+--    Recria a regra da coluna accompanied_by para aceitar o novo tipo.
+-- ========================================================
+DO $$
+DECLARE c TEXT;
+BEGIN
+  FOR c IN
+    SELECT conname FROM pg_constraint
+    WHERE conrelid = 'public.attendees'::regclass AND contype = 'c'
+      AND pg_get_constraintdef(oid) ILIKE '%accompanied_by%'
+  LOOP
+    EXECUTE format('ALTER TABLE public.attendees DROP CONSTRAINT %I', c);
+  END LOOP;
+END $$;
+
+ALTER TABLE public.attendees ADD CONSTRAINT attendees_accompanied_by_check
+  CHECK (accompanied_by IS NULL OR accompanied_by IN ('Esposo(a)', 'Familiar', 'Professor parceiro', 'Colaborador', 'Amigo'));

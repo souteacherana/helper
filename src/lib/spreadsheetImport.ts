@@ -50,7 +50,12 @@ const COLUMNS = {
 
 type ColumnKey = keyof typeof COLUMNS;
 
-const ACCOMPANIED_BY: AccompaniedBy[] = ['Esposo(a)', 'Professor parceiro', 'Colaborador', 'Amigo'];
+const ACCOMPANIED_BY: AccompaniedBy[] = ['Esposo(a)', 'Familiar', 'Professor parceiro', 'Colaborador', 'Amigo'];
+
+// Parentescos escritos de outro jeito na planilha viram "Familiar"
+const FAMILY_WORDS = ['irma(o)', 'irmao', 'irma', 'filho(a)', 'filho', 'filha', 'pai', 'mae', 'tio', 'tia', 'primo', 'prima', 'sobrinho', 'sobrinha', 'avo', 'parente'];
+const accompaniedByCell = (value: Cell): Cell =>
+  FAMILY_WORDS.includes(normalizeText(asText(value))) ? 'Familiar' : value;
 const PAYMENT_METHODS: PaymentMethod[] = ['Boleto', 'Cartão de Crédito'];
 
 const headerKey = (title: string) => normalizeText(title).replace(/[*?]/g, '').replace(/\s+/g, ' ').trim();
@@ -164,7 +169,7 @@ export function buildImportPreview(sheet: Cell[][], existing: Attendee[]): Impor
     const level = asOption<TicketLevel>(get('level'), ['VIP', 'SILVER']);
     if (!level) fail('Ingresso deve ser VIP ou SILVER');
 
-    const accompaniedBy = asOption(get('accompaniedBy'), ACCOMPANIED_BY);
+    const accompaniedBy = asOption(accompaniedByCell(get('accompaniedBy')), ACCOMPANIED_BY);
     if (accompaniedBy === null) fail(`Tipo de acompanhante inválido: "${asText(get('accompaniedBy'))}"`);
 
     const paymentMethod = asOption(get('paymentMethod'), PAYMENT_METHODS);

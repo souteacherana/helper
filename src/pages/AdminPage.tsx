@@ -9,7 +9,7 @@ import { formatPhoneInput, formatCurrencyInput, matchesQuery } from '../lib/form
 import { Avatar } from '../components/Avatar';
 import { SpreadsheetImport } from '../components/SpreadsheetImport';
 
-const ACCOMPANIED_BY_OPTIONS: AccompaniedBy[] = ['Esposo(a)', 'Professor parceiro', 'Colaborador', 'Amigo'];
+const ACCOMPANIED_BY_OPTIONS: AccompaniedBy[] = ['Esposo(a)', 'Familiar', 'Professor parceiro', 'Colaborador', 'Amigo'];
 const PAYMENT_METHOD_OPTIONS: PaymentMethod[] = ['Boleto', 'Cartão de Crédito'];
 const MENTORSHIP_OPTIONS = ['Mentoria Partiu 10K', 'Professores de Elite'];
 const CYCLE_OPTIONS = ['1º ciclo', '2º ciclo', '3º ciclo', '4º ciclo', '5º ciclo', 'Finalizado'];

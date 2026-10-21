@@ -1,7 +1,7 @@
 export type TicketLevel = 'VIP' | 'SILVER';
 export type BadgeLevel = 'VIP' | 'SILVER' | 'PATROCINADOR';
 export type ConfirmationStatus = 'CONFIRMED' | 'AWAITING';
-export type AccompaniedBy = 'Esposo(a)' | 'Professor parceiro' | 'Colaborador' | 'Amigo';
+export type AccompaniedBy = 'Esposo(a)' | 'Familiar' | 'Professor parceiro' | 'Colaborador' | 'Amigo';
 export type PaymentMethod = 'Boleto' | 'Cartão de Crédito';
 
 export interface CloserNote {

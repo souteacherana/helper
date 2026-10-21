@@ -32,6 +32,7 @@ import {
   type CloserFilters
 } from '../lib/closerFilters';
 import { buildWhatsAppUrl, formatCheckInTime, formatDateBR, matchesQuery } from '../lib/format';
+import { buildNameIndex, companionChipLabel, companionDisplayName, companionsOf } from '../lib/companions';
 import { EVENT_DAYS, currentEventDay } from '../lib/eventDays';
 
 const InstagramIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
@@ -72,6 +73,17 @@ export const ClosersPage: React.FC = () => {
     setSearchParams({}, { replace: true });
   }, [focusId, attendees, setSearchParams]);
   const [newNoteText, setNewNoteText] = useState<{ [key: string]: string }>({});
+
+  // Liga os acompanhantes citados na ficha aos cadastros deles
+  const byName = useMemo(() => buildNameIndex(attendees), [attendees]);
+
+  /** Abre a ficha de outra pessoa (ex: o acompanhante) no topo da lista. */
+  const openPerson = (id: string, name: string) => {
+    setFilters(EMPTY_FILTERS);
+    setSearch(name);
+    setExpandedId(id);
+    window.scrollTo({ top: 0 });
+  };
 
   const filteredAttendees = useMemo(() => {
     return attendees.filter(item => {
@@ -280,10 +292,12 @@ export const ClosersPage: React.FC = () => {
 
                     {item.isAccompanied && (
                       <span
-                        className="text-[11px] font-bold px-2 py-0.5 rounded bg-pink-50 text-pink-700 border border-pink-200"
-                        title={item.companionName ? `Acompanhante: ${item.companionName}` : undefined}
+                        className="text-[11px] font-bold px-2 py-0.5 rounded bg-pink-50 text-pink-700 border border-pink-200 flex items-center gap-1"
+                        title={companionsOf(item, byName).map(c => companionDisplayName(c.name)).join(', ')}
                       >
-                        Acompanhado{item.accompaniedBy ? ` (${item.accompaniedBy})` : ''}
+                        <Users className="w-3 h-3" />
+                        {companionChipLabel(companionsOf(item, byName))}
+                        {item.accompaniedBy ? ` (${item.accompaniedBy})` : ''}
                       </span>
                     )}
                   </div>
@@ -378,21 +392,53 @@ export const ClosersPage: React.FC = () => {
                       })}
                     </div>
 
-                    {/* Acompanhante */}
-                    <div className="p-3 rounded-xl bg-white border border-slate-200 text-xs space-y-1">
-                      <div className="text-slate-400 font-medium flex items-center space-x-1 mb-0.5">
+                    {/* Acompanhantes, ligados aos cadastros deles */}
+                    <div className="p-3 rounded-xl bg-white border border-slate-200 text-xs space-y-2">
+                      <div className="text-slate-400 font-medium flex items-center space-x-1">
                         <Users className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Acompanhante</span>
+                        <span>{item.isAccompanied ? 'Vem com' : 'Acompanhante'}</span>
+                        {item.accompaniedBy && <span className="text-slate-500">• {item.accompaniedBy}</span>}
                       </div>
-                      {item.isAccompanied ? (
-                        <div className="text-slate-900 font-bold">
-                          {item.companionName || 'Nome não informado'}{' '}
-                          {item.accompaniedBy && (
-                            <span className="text-slate-500 font-medium">({item.accompaniedBy})</span>
-                          )}
-                        </div>
-                      ) : (
+                      {!item.isAccompanied ? (
                         <div className="text-slate-500 font-medium">Não está acompanhado</div>
+                      ) : (
+                        companionsOf(item, byName).map((c, i) => {
+                          const person = c.attendee;
+                          const label = c.name ? companionDisplayName(c.name) : 'Acompanhante — nome a confirmar';
+                          return (
+                            <div key={`${c.name}-${i}`} className="flex items-center gap-2.5 p-2 -mx-1 rounded-lg bg-slate-50">
+                              <Avatar
+                                name={c.pending || !c.name ? '?' : c.name}
+                                photoUrl={person?.photoUrl}
+                                className="w-10 h-10 rounded-lg"
+                                textClassName="text-xs"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className={`font-bold leading-tight ${c.pending ? 'text-amber-700' : 'text-slate-900'}`}>{label}</div>
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                                  {person ? (
+                                    <>
+                                      <BadgePill level={getBadgeLevel(person)} size="sm" />
+                                      <span className={`font-semibold ${person.isPresent ? 'text-emerald-700' : 'text-slate-400'}`}>
+                                        {person.isPresent ? `Presente hoje (${formatCheckInTime(person.checkInTime)})` : 'Ainda não chegou hoje'}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="text-slate-400">Não cadastrado no evento</span>
+                                  )}
+                                </div>
+                              </div>
+                              {person && (
+                                <button
+                                  onClick={() => openPerson(person.id, person.name)}
+                                  className="shrink-0 px-3 py-2.5 rounded-lg border border-slate-200 bg-white text-[11px] font-bold text-slate-700 hover:bg-slate-100"
+                                >
+                                  Ver ficha
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })
                       )}
                     </div>
 

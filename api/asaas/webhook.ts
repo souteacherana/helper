@@ -5,10 +5,15 @@
  * responder 200 rápido: se várias respostas seguidas falharem, o Asaas interrompe a fila.
  *   ASAAS_WEBHOOK_TOKEN  token cadastrado no webhook (o Asaas envia no cabeçalho asaas-access-token)
  *
- * Por enquanto só confirma o recebimento. As vendas do HELPER (fase 2) vão ser reconhecidas
- * pelo externalReference das cobranças que o próprio HELPER criar.
+ * As cobranças do HELPER são reconhecidas pelo externalReference ("helper:<venda>:<parte>");
+ * as outras da conta são só confirmadas. Se a atualização falhar (ex: Asaas fora do ar), responde
+ * 200 mesmo assim para não travar a fila; o botão "Atualizar" da proposta confere de novo.
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { asaasClient } from '../_lib/asaas.js';
+import { adminDb } from '../_lib/server.js';
+import { syncSalePart } from '../_lib/salesSync.js';
+import { parseReference } from '../../src/lib/sales.js';
 
 type Env = Record<string, string | undefined>;
 
@@ -34,12 +39,21 @@ export async function handleAsaasWebhook(token: string | null, input: unknown, e
     return { status: 401, body: { error: 'Não autorizado' } };
   }
 
-  const { event } = (input ?? {}) as { event?: unknown };
+  const { event, payment } = (input ?? {}) as { event?: unknown; payment?: { externalReference?: unknown } };
   if (typeof event !== 'string') {
     return { status: 400, body: { error: 'Aviso inválido' } };
   }
 
-  return { status: 200, body: { received: true, processed: false } };
+  const ref = parseReference(payment?.externalReference);
+  if (!ref) return { status: 200, body: { received: true, processed: false } };
+
+  try {
+    await syncSalePart(adminDb(env), asaasClient(env), ref.saleId, ref.position);
+  } catch (err) {
+    console.error(`Asaas webhook: falha ao atualizar ${ref.saleId}/${ref.position} (${event}):`, err);
+    return { status: 200, body: { received: true, processed: false } };
+  }
+  return { status: 200, body: { received: true, processed: true } };
 }
 
 // Vercel Function (Node.js runtime, Web API)

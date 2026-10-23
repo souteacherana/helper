@@ -5,7 +5,10 @@ import { getBadgeLevel, type Attendee } from '../types/index';
 import { Avatar } from '../components/Avatar';
 import { BadgePill } from '../components/BadgePill';
 import { BillingEditor } from '../components/BillingEditor';
+import { OffersPanel } from '../components/OffersPanel';
+import { SalesPanel } from '../components/SalesPanel';
 import { useBillingProfiles } from '../hooks/useBillingProfiles';
+import { useSales } from '../hooks/useSales';
 import { missingBillingFields, newBillingProfile, type BillingProfile } from '../lib/billing';
 import { matchesQuery } from '../lib/format';
 
@@ -19,10 +22,19 @@ const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
 
 const EMPTY_PROFILE = 'Ficha vazia';
 
-/** Dados de cobrança e contrato de cada participante (só admin). */
+type Tab = 'FICHAS' | 'PROPOSTAS' | 'VENDAS';
+const TABS: { value: Tab; label: string }[] = [
+  { value: 'FICHAS', label: 'Fichas' },
+  { value: 'PROPOSTAS', label: 'Propostas' },
+  { value: 'VENDAS', label: 'Vendas' }
+];
+
+/** Dados de cobrança e contrato, produtos oferecidos e painel de vendas (só admin). */
 export const CobrancaPage: React.FC = () => {
-  const { attendees } = useApp();
+  const { attendees, userSession } = useApp();
   const { profiles, loading, tableMissing, saveProfile } = useBillingProfiles();
+  const salesApi = useSales();
+  const [tab, setTab] = useState<Tab>('FICHAS');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('INCOMPLETE');
   const [editing, setEditing] = useState<{ attendee: Attendee; profile: BillingProfile } | null>(null);
@@ -62,14 +74,42 @@ export const CobrancaPage: React.FC = () => {
           <Wallet className="w-5 h-5" />
         </div>
         <div>
-          <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight">Dados de cobrança</h1>
+          <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight">Cobrança</h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            CPF, endereço e dados do contrato. Só o admin vê; os closers só sabem se a ficha está completa.
+            Fichas com CPF e endereço (só o admin vê), propostas que os closers oferecem e as vendas do evento.
           </p>
         </div>
       </div>
 
-      {tableMissing ? (
+      <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-slate-200/60">
+        {TABS.map(t => (
+          <button
+            key={t.value}
+            type="button"
+            onClick={() => setTab(t.value)}
+            aria-pressed={tab === t.value}
+            className={`py-2.5 rounded-lg text-xs font-bold transition ${
+              tab === t.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab !== 'FICHAS' && salesApi.tablesMissing ? (
+        <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl p-4 text-sm flex gap-2.5">
+          <AlertTriangle className="w-5 h-5 shrink-0" />
+          <p>
+            O banco ainda não tem as tabelas de propostas. Rode a <strong>seção 10</strong> do <code>supabase_schema.sql</code> no
+            SQL Editor do Supabase e recarregue a página.
+          </p>
+        </div>
+      ) : tab === 'PROPOSTAS' ? (
+        <OffersPanel salesApi={salesApi} />
+      ) : tab === 'VENDAS' ? (
+        <SalesPanel salesApi={salesApi} closerName={userSession.userName || 'Admin'} />
+      ) : tableMissing ? (
         <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl p-4 text-sm flex gap-2.5">
           <AlertTriangle className="w-5 h-5 shrink-0" />
           <p>

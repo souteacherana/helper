@@ -511,3 +511,147 @@ $$;
 
 REVOKE ALL ON FUNCTION public.billing_status() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.billing_status() TO authenticated;
+
+-- ========================================================
+-- 10. Propostas e vendas (Asaas)
+--    Cada produto tem valor total fixo. O closer divide o total em partes (a primeira é a
+--    entrada; ex: Pix + cartão A + cartão B) e o servidor cria uma cobrança no Asaas por parte.
+--    Vendas e partes só são gravadas pelo servidor (/api/sales/* e webhook do Asaas, com a
+--    service key); a equipe só lê, em tempo real. A venda conta como fechada quando a entrada é paga.
+-- ========================================================
+CREATE TABLE IF NOT EXISTS public.offers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  total_value NUMERIC(12, 2) CHECK (total_value IS NULL OR total_value > 0),
+  condition TEXT,
+  -- Só aparece para quem está em offer_access (ex: Mastermind)
+  restricted BOOLEAN NOT NULL DEFAULT FALSE,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+INSERT INTO public.offers (id, name, restricted, sort_order) VALUES
+  ('partiu10k', 'Partiu 10K', FALSE, 1),
+  ('elite', 'Professores de Elite', FALSE, 2),
+  ('mastermind', 'Mastermind', TRUE, 3)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS public.offer_access (
+  offer_id TEXT NOT NULL REFERENCES public.offers(id) ON DELETE CASCADE,
+  attendee_id TEXT NOT NULL REFERENCES public.attendees(id) ON DELETE CASCADE,
+  PRIMARY KEY (offer_id, attendee_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.sales (
+  id TEXT PRIMARY KEY DEFAULT ('venda-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 12)),
+  -- RESTRICT: quem tem venda não pode ser excluído por engano
+  attendee_id TEXT NOT NULL REFERENCES public.attendees(id) ON DELETE RESTRICT,
+  offer_id TEXT NOT NULL REFERENCES public.offers(id),
+  offer_name TEXT NOT NULL,
+  total_value NUMERIC(12, 2) NOT NULL,
+  closer_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'CREATING'
+    CHECK (status IN ('CREATING', 'PENDING', 'ENTRY_PAID', 'PAID', 'CANCELLED', 'FAILED')),
+  error TEXT,
+  asaas_customer_id TEXT,
+  entry_paid_at TIMESTAMP WITH TIME ZONE,
+  paid_at TIMESTAMP WITH TIME ZONE,
+  cancelled_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS sales_attendee_idx ON public.sales (attendee_id);
+
+CREATE TABLE IF NOT EXISTS public.sale_parts (
+  sale_id TEXT NOT NULL REFERENCES public.sales(id) ON DELETE CASCADE,
+  -- 0 = entrada
+  position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 9),
+  method TEXT NOT NULL CHECK (method IN ('PIX', 'BOLETO', 'CREDIT_CARD')),
+  amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+  installments INTEGER NOT NULL DEFAULT 1 CHECK (installments BETWEEN 1 AND 12),
+  due_date DATE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING'
+    CHECK (status IN ('PENDING', 'PARTIAL', 'PAID', 'OVERDUE', 'CANCELLED', 'REFUNDED')),
+  paid_installments INTEGER NOT NULL DEFAULT 0,
+  asaas_payment_id TEXT,
+  asaas_installment_id TEXT,
+  invoice_url TEXT,
+  paid_at TIMESTAMP WITH TIME ZONE,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  PRIMARY KEY (sale_id, position)
+);
+
+ALTER TABLE public.offers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.offer_access ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sale_parts ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "offers_select_team" ON public.offers;
+CREATE POLICY "offers_select_team" ON public.offers
+  FOR SELECT TO authenticated USING (public.app_role() IN ('CLOSER', 'ADMIN'));
+DROP POLICY IF EXISTS "offers_write_admin" ON public.offers;
+CREATE POLICY "offers_write_admin" ON public.offers
+  FOR ALL TO authenticated
+  USING (public.app_role() = 'ADMIN') WITH CHECK (public.app_role() = 'ADMIN');
+
+DROP POLICY IF EXISTS "offer_access_select_team" ON public.offer_access;
+CREATE POLICY "offer_access_select_team" ON public.offer_access
+  FOR SELECT TO authenticated USING (public.app_role() IN ('CLOSER', 'ADMIN'));
+DROP POLICY IF EXISTS "offer_access_write_admin" ON public.offer_access;
+CREATE POLICY "offer_access_write_admin" ON public.offer_access
+  FOR ALL TO authenticated
+  USING (public.app_role() = 'ADMIN') WITH CHECK (public.app_role() = 'ADMIN');
+
+-- Vendas: equipe só lê (quem grava é o servidor)
+DROP POLICY IF EXISTS "sales_select_team" ON public.sales;
+CREATE POLICY "sales_select_team" ON public.sales
+  FOR SELECT TO authenticated USING (public.app_role() IN ('CLOSER', 'ADMIN'));
+DROP POLICY IF EXISTS "sale_parts_select_team" ON public.sale_parts;
+CREATE POLICY "sale_parts_select_team" ON public.sale_parts
+  FOR SELECT TO authenticated USING (public.app_role() IN ('CLOSER', 'ADMIN'));
+
+DO $$
+DECLARE t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['offers', 'offer_access', 'sales', 'sale_parts'] LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+    END IF;
+  END LOOP;
+END $$;
+
+-- Para cobrar no Asaas bastam nome, CPF/CNPJ e e-mail; o resto da ficha é para o contrato.
+-- (mesma regra de missingForCharge em src/lib/billing.ts)
+CREATE OR REPLACE FUNCTION public.billing_missing_charge(p public.billing_profiles)
+RETURNS TEXT[]
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT array_remove(ARRAY[
+    CASE WHEN p.person_type = 'PJ' AND coalesce(trim(p.company_name), '') = '' THEN 'Razão social' END,
+    CASE WHEN p.person_type = 'PJ' AND coalesce(trim(p.cnpj), '') = '' THEN 'CNPJ' END,
+    CASE WHEN p.person_type = 'PF' AND coalesce(trim(p.full_name), '') = '' THEN 'Nome' END,
+    CASE WHEN p.person_type = 'PF' AND coalesce(trim(p.cpf), '') = '' THEN 'CPF' END,
+    CASE WHEN coalesce(trim(p.email), '') = '' THEN 'E-mail' END
+  ], NULL)
+$$;
+
+-- billing_status passa a dizer também o que falta só para cobrar
+DROP FUNCTION IF EXISTS public.billing_status();
+CREATE FUNCTION public.billing_status()
+RETURNS TABLE (attendee_id TEXT, person_type TEXT, missing TEXT[], missing_for_charge TEXT[])
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT a.id,
+         coalesce(b.person_type, 'PF'),
+         CASE WHEN b.attendee_id IS NULL THEN ARRAY['Ficha vazia'] ELSE public.billing_missing(b) END,
+         CASE WHEN b.attendee_id IS NULL THEN ARRAY['Ficha vazia'] ELSE public.billing_missing_charge(b) END
+  FROM public.attendees a
+  LEFT JOIN public.billing_profiles b ON b.attendee_id = a.id
+  WHERE public.app_role() IN ('CLOSER', 'ADMIN')
+$$;
+
+REVOKE ALL ON FUNCTION public.billing_status() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.billing_status() TO authenticated;

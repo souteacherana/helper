@@ -18,10 +18,17 @@ import {
   Users,
   GraduationCap,
   CreditCard,
-  Gift
+  Gift,
+  BadgeDollarSign,
+  FileSignature,
+  CheckCircle2
 } from 'lucide-react';
-import { getBadgeLevel } from '../types/index';
+import { getBadgeLevel, type Attendee } from '../types/index';
 import { FilterSheet } from '../components/FilterSheet';
+import { ProposalSheet } from '../components/ProposalSheet';
+import { ContractSheet } from '../components/ContractSheet';
+import { useSales } from '../hooks/useSales';
+import { isClosedSale, isOpenSale, type Sale } from '../lib/sales';
 import {
   EMPTY_FILTERS,
   FILTER_PRESETS,
@@ -45,6 +52,23 @@ const InstagramIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4"
 
 export const ClosersPage: React.FC = () => {
   const { attendees, addCloserNote, userSession } = useApp();
+  const salesApi = useSales();
+  const closerName = userSession.userName || (userSession.role === 'ADMIN' ? 'Admin' : 'Closer');
+  const [proposalFor, setProposalFor] = useState<Attendee | null>(null);
+  const [contractFor, setContractFor] = useState<Attendee | null>(null);
+  const closeProposal = useCallback(() => setProposalFor(null), []);
+  const closeContract = useCallback(() => setContractFor(null), []);
+  // Propostas que valem (não canceladas) de cada pessoa, mais recente primeiro
+  const salesByAttendee = useMemo(() => {
+    const map = new Map<string, Sale[]>();
+    for (const sale of salesApi.sales) {
+      if (!isOpenSale(sale.status)) continue;
+      const list = map.get(sale.attendeeId) ?? [];
+      list.push(sale);
+      map.set(sale.attendeeId, list);
+    }
+    return map;
+  }, [salesApi.sales]);
 
   const [search, setSearch] = useState('');
   // Filtros ficam lembrados neste aparelho
@@ -220,6 +244,7 @@ export const ClosersPage: React.FC = () => {
           {filteredAttendees.map(item => {
             const isExpanded = expandedId === item.id;
             const calculatedBadge = getBadgeLevel(item);
+            const itemSales = salesByAttendee.get(item.id) ?? [];
             const whatsappUrl = buildWhatsAppUrl(
               item.phone,
               `Olá ${item.name.split(' ')[0]}! Tudo bem? Sou da equipe da Teacher Ana de Araújo na Imersão Rise...`
@@ -267,22 +292,63 @@ export const ClosersPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {whatsappUrl && (
+                  </div>
+
+                  {/* Ações rápidas */}
+                  <div className="grid grid-cols-3 gap-2">
+                    {whatsappUrl ? (
                       <a
                         href={whatsappUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="px-3 py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold flex items-center space-x-1 shrink-0 transition"
+                        className="py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold flex items-center justify-center gap-1.5 transition"
                         title="Chamar no WhatsApp"
                       >
                         <MessageCircle className="w-4 h-4 text-emerald-600" />
-                        <span className="hidden sm:inline">WhatsApp</span>
+                        <span>WhatsApp</span>
                       </a>
+                    ) : (
+                      <span className="py-2.5 rounded-xl bg-slate-50 text-slate-400 border border-slate-200 text-xs font-bold flex items-center justify-center gap-1.5" title="Sem telefone">
+                        <MessageCircle className="w-4 h-4" />
+                        <span>WhatsApp</span>
+                      </span>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => setProposalFor(item)}
+                      className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition"
+                    >
+                      <BadgeDollarSign className="w-4 h-4" />
+                      <span>Propostas</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setContractFor(item)}
+                      disabled={!itemSales.some(s => isClosedSale(s.status))}
+                      title={itemSales.some(s => isClosedSale(s.status)) ? 'Contrato da venda' : 'Disponível depois que a entrada for paga'}
+                      className="py-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-xs font-bold flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:hover:bg-white"
+                    >
+                      <FileSignature className="w-4 h-4" />
+                      <span>Contrato</span>
+                    </button>
                   </div>
 
                   {/* Context Badges */}
                   <div className="flex flex-wrap items-center gap-1.5 text-xs pt-0.5">
+                    {itemSales.map(sale =>
+                      isClosedSale(sale.status) ? (
+                        <span key={sale.id} className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-600 text-white flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Vendido: {sale.offerName}
+                        </span>
+                      ) : (
+                        <span key={sale.id} className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1">
+                          <BadgeDollarSign className="w-3 h-3" />
+                          Proposta enviada: {sale.offerName}
+                        </span>
+                      )
+                    )}
+
                     {item.nearRenewal && (
                       <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 flex items-center space-x-1">
                         <RotateCw className="w-3 h-3 text-rose-600" />
@@ -554,6 +620,9 @@ export const ClosersPage: React.FC = () => {
           })}
         </div>
       )}
+
+      {proposalFor && <ProposalSheet attendee={proposalFor} salesApi={salesApi} closerName={closerName} onClose={closeProposal} />}
+      {contractFor && <ContractSheet attendee={contractFor} salesApi={salesApi} onClose={closeContract} />}
     </div>
   );
 };

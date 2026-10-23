@@ -111,6 +111,15 @@ export function missingBillingFields(profile: BillingProfile): string[] {
   return FIELD_KEYS.filter(k => isRequired(k, profile.personType) && !profile[k].trim()).map(k => BILLING_FIELDS[k].label);
 }
 
+/**
+ * O que falta só para cobrar no Asaas (o cliente é a empresa, no caso de PJ). O resto da ficha
+ * é para o contrato. Mesma regra de public.billing_missing_charge() no supabase_schema.sql (seção 10).
+ */
+export function missingForCharge(profile: BillingProfile): string[] {
+  const keys: BillingField[] = profile.personType === 'PJ' ? ['companyName', 'cnpj', 'email'] : ['fullName', 'cpf', 'email'];
+  return keys.filter(k => !profile[k].trim()).map(k => BILLING_FIELDS[k].label);
+}
+
 // ---------- Validação ----------
 
 const onlyDigits = (v: string) => v.replace(/\D/g, '');

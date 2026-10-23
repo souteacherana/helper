@@ -105,7 +105,7 @@ export function useSales() {
   // Modo demonstração: todas as fichas prontas para cobrança, faltando os dados do contrato
   useEffect(() => {
     if (supabase) return;
-    const demo: BillingStatus = { personType: 'PF', missing: ['RG', 'Nacionalidade', 'Estado civil'], missingForCharge: [] };
+    const demo: BillingStatus = { personType: 'PF', missing: ['Nacionalidade', 'Estado civil'], missingForCharge: [] };
     setBilling(new Map(attendees.map(a => [a.id, demo])));
   }, [attendees]);
 

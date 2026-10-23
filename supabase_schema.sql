@@ -437,8 +437,9 @@ ALTER TABLE public.attendees ADD CONSTRAINT attendees_accompanied_by_check
 -- ========================================================
 -- 9. Dados de cobrança e contrato (vendas na Imersão)
 --    Ficha separada da ficha comercial, com os campos que o jurídico usa no contrato.
---    CPF, RG e endereço: só o admin lê e edita. Os closers usam billing_status(),
+--    CPF, RG e endereço: só o admin lê e edita. Os closers usam billing_status() (seção 10),
 --    que diz só se a ficha está completa (e o que falta), sem nenhum dado pessoal.
+--    Pode ser rodada de novo sozinha (ex: depois de mudar quais campos são obrigatórios).
 --    Na empresa (PJ), os campos de pessoa são do representante que assina.
 -- ========================================================
 CREATE TABLE IF NOT EXISTS public.billing_profiles (
@@ -474,7 +475,8 @@ CREATE POLICY "billing_admin" ON public.billing_profiles
   FOR ALL TO authenticated
   USING (public.app_role() = 'ADMIN') WITH CHECK (public.app_role() = 'ADMIN');
 
--- Campos obrigatórios que faltam (mesma regra de missingBillingFields em src/lib/billing.ts)
+-- Campos obrigatórios que faltam (mesma regra de missingBillingFields em src/lib/billing.ts).
+-- RG e complemento são opcionais.
 CREATE OR REPLACE FUNCTION public.billing_missing(p public.billing_profiles)
 RETURNS TEXT[]
 LANGUAGE sql IMMUTABLE AS $$
@@ -483,7 +485,6 @@ LANGUAGE sql IMMUTABLE AS $$
     CASE WHEN p.person_type = 'PJ' AND coalesce(trim(p.cnpj), '') = '' THEN 'CNPJ' END,
     CASE WHEN coalesce(trim(p.full_name), '') = '' THEN 'Nome' END,
     CASE WHEN coalesce(trim(p.cpf), '') = '' THEN 'CPF' END,
-    CASE WHEN coalesce(trim(p.rg), '') = '' THEN 'RG' END,
     CASE WHEN coalesce(trim(p.nationality), '') = '' THEN 'Nacionalidade' END,
     CASE WHEN coalesce(trim(p.marital_status), '') = '' THEN 'Estado civil' END,
     CASE WHEN coalesce(trim(p.email), '') = '' THEN 'E-mail' END,
@@ -497,20 +498,6 @@ LANGUAGE sql IMMUTABLE AS $$
   ], NULL)
 $$;
 
--- Equipe: situação da ficha de cada participante, sem nenhum dado pessoal
-CREATE OR REPLACE FUNCTION public.billing_status()
-RETURNS TABLE (attendee_id TEXT, person_type TEXT, missing TEXT[])
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT a.id,
-         coalesce(b.person_type, 'PF'),
-         CASE WHEN b.attendee_id IS NULL THEN ARRAY['Ficha vazia'] ELSE public.billing_missing(b) END
-  FROM public.attendees a
-  LEFT JOIN public.billing_profiles b ON b.attendee_id = a.id
-  WHERE public.app_role() IN ('CLOSER', 'ADMIN')
-$$;
-
-REVOKE ALL ON FUNCTION public.billing_status() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.billing_status() TO authenticated;
 
 -- ========================================================
 -- 10. Propostas e vendas (Asaas)
@@ -639,7 +626,8 @@ LANGUAGE sql IMMUTABLE AS $$
   ], NULL)
 $$;
 
--- billing_status passa a dizer também o que falta só para cobrar
+-- Equipe: situação da ficha de cada participante (o que falta para o contrato e só para
+-- cobrar), sem nenhum dado pessoal
 DROP FUNCTION IF EXISTS public.billing_status();
 CREATE FUNCTION public.billing_status()
 RETURNS TABLE (attendee_id TEXT, person_type TEXT, missing TEXT[], missing_for_charge TEXT[])

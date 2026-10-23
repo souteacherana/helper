@@ -55,7 +55,7 @@ export const BILLING_FIELDS: Record<BillingField, FieldDef> = {
   cnpj: { label: 'CNPJ', column: 'cnpj', required: 'PJ' },
   fullName: { label: 'Nome', column: 'full_name', required: 'always' },
   cpf: { label: 'CPF', column: 'cpf', required: 'always' },
-  rg: { label: 'RG', column: 'rg', required: 'always' },
+  rg: { label: 'RG', column: 'rg', required: false },
   nationality: { label: 'Nacionalidade', column: 'nationality', required: 'always' },
   maritalStatus: { label: 'Estado civil', column: 'marital_status', required: 'always' },
   email: { label: 'E-mail', column: 'email', required: 'always' },

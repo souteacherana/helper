@@ -31,3 +31,6 @@ participantes_*.xlsx
 
 # Configuração local de ferramentas de desenvolvimento
 .claude/
+
+# Conversas exportadas do WhatsApp (dados pessoais de clientes, não versionar)
+whatsapp/

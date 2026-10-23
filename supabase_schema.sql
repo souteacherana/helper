@@ -475,26 +475,18 @@ CREATE POLICY "billing_admin" ON public.billing_profiles
   FOR ALL TO authenticated
   USING (public.app_role() = 'ADMIN') WITH CHECK (public.app_role() = 'ADMIN');
 
--- Campos obrigatórios que faltam (mesma regra de missingBillingFields em src/lib/billing.ts).
--- RG e complemento são opcionais.
+-- Campos obrigatórios que faltam (mesma regra de missingBillingFields em src/lib/billing.ts):
+-- o que o termo de adesão da Imersão pede. Nome, CPF (ou CNPJ, se empresa), e-mail e telefone;
+-- o resto da ficha é opcional.
 CREATE OR REPLACE FUNCTION public.billing_missing(p public.billing_profiles)
 RETURNS TEXT[]
 LANGUAGE sql IMMUTABLE AS $$
   SELECT array_remove(ARRAY[
-    CASE WHEN p.person_type = 'PJ' AND coalesce(trim(p.company_name), '') = '' THEN 'Razão social' END,
     CASE WHEN p.person_type = 'PJ' AND coalesce(trim(p.cnpj), '') = '' THEN 'CNPJ' END,
     CASE WHEN coalesce(trim(p.full_name), '') = '' THEN 'Nome' END,
-    CASE WHEN coalesce(trim(p.cpf), '') = '' THEN 'CPF' END,
-    CASE WHEN coalesce(trim(p.nationality), '') = '' THEN 'Nacionalidade' END,
-    CASE WHEN coalesce(trim(p.marital_status), '') = '' THEN 'Estado civil' END,
+    CASE WHEN p.person_type = 'PF' AND coalesce(trim(p.cpf), '') = '' THEN 'CPF' END,
     CASE WHEN coalesce(trim(p.email), '') = '' THEN 'E-mail' END,
-    CASE WHEN coalesce(trim(p.phone), '') = '' THEN 'Telefone' END,
-    CASE WHEN coalesce(trim(p.zip_code), '') = '' THEN 'CEP' END,
-    CASE WHEN coalesce(trim(p.street), '') = '' THEN 'Rua' END,
-    CASE WHEN coalesce(trim(p.address_number), '') = '' THEN 'Número' END,
-    CASE WHEN coalesce(trim(p.district), '') = '' THEN 'Bairro' END,
-    CASE WHEN coalesce(trim(p.city), '') = '' THEN 'Cidade' END,
-    CASE WHEN coalesce(trim(p.state), '') = '' THEN 'Estado' END
+    CASE WHEN coalesce(trim(p.phone), '') = '' THEN 'Telefone' END
   ], NULL)
 $$;
 
@@ -612,15 +604,14 @@ BEGIN
   END LOOP;
 END $$;
 
--- Para cobrar no Asaas bastam nome, CPF/CNPJ e e-mail; o resto da ficha é para o contrato.
--- (mesma regra de missingForCharge em src/lib/billing.ts)
+-- Para cobrar no Asaas bastam nome, CPF/CNPJ e e-mail (empresa sem razão social: cobra no
+-- nome do representante). Mesma regra de missingForCharge em src/lib/billing.ts.
 CREATE OR REPLACE FUNCTION public.billing_missing_charge(p public.billing_profiles)
 RETURNS TEXT[]
 LANGUAGE sql IMMUTABLE AS $$
   SELECT array_remove(ARRAY[
-    CASE WHEN p.person_type = 'PJ' AND coalesce(trim(p.company_name), '') = '' THEN 'Razão social' END,
+    CASE WHEN coalesce(trim(CASE WHEN p.person_type = 'PJ' THEN coalesce(nullif(trim(p.company_name), ''), p.full_name) ELSE p.full_name END), '') = '' THEN 'Nome' END,
     CASE WHEN p.person_type = 'PJ' AND coalesce(trim(p.cnpj), '') = '' THEN 'CNPJ' END,
-    CASE WHEN p.person_type = 'PF' AND coalesce(trim(p.full_name), '') = '' THEN 'Nome' END,
     CASE WHEN p.person_type = 'PF' AND coalesce(trim(p.cpf), '') = '' THEN 'CPF' END,
     CASE WHEN coalesce(trim(p.email), '') = '' THEN 'E-mail' END
   ], NULL)

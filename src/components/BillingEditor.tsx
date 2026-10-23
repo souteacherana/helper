@@ -11,6 +11,7 @@ import {
   NATIONALITY_SUGGESTIONS,
   billingErrors,
   formatBillingInput,
+  isRequiredField,
   missingBillingFields,
   type BillingField,
   type BillingProfile,
@@ -93,7 +94,7 @@ export const BillingEditor: React.FC<BillingEditorProps> = ({ attendee, initial,
 
   const field = (key: BillingField) => {
     const def = BILLING_FIELDS[key];
-    const required = def.required === 'always' || (def.required === 'PJ' && profile.personType === 'PJ');
+    const required = isRequiredField(key, profile.personType);
     const source = profile[key] ? profile.sources[key] : undefined;
     const error = errors[key];
     const listId = DATALIST[key] ? `billing-${key}` : undefined;

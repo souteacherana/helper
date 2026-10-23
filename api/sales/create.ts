@@ -52,12 +52,15 @@ interface BillingRow {
   asaas_customer_id: string | null;
 }
 
+/** Nome do cliente no Asaas: na empresa, a razão social (ou o representante, se não houver) */
+const customerName = (p: BillingRow) => (p.person_type === 'PJ' ? p.company_name?.trim() || p.full_name?.trim() : p.full_name?.trim()) || '';
+
 /** O que falta para cobrar (mesma regra de missingForCharge em src/lib/billing.ts) */
 function missingForCharge(p: BillingRow): string[] {
   const need: [string | null, string][] =
     p.person_type === 'PJ'
-      ? [[p.company_name, 'Razão social'], [p.cnpj, 'CNPJ'], [p.email, 'E-mail']]
-      : [[p.full_name, 'Nome'], [p.cpf, 'CPF'], [p.email, 'E-mail']];
+      ? [[customerName(p), 'Nome'], [p.cnpj, 'CNPJ'], [p.email, 'E-mail']]
+      : [[customerName(p), 'Nome'], [p.cpf, 'CPF'], [p.email, 'E-mail']];
   return need.filter(([v]) => !v?.trim()).map(([, label]) => label);
 }
 
@@ -79,7 +82,7 @@ async function ensureCustomer(asaas: AsaasClient, db: SupabaseClient, profile: B
   if (!id) {
     const mobile = digits(profile.phone || attendeePhone);
     const created = await asaas.createCustomer({
-      name: (isPJ ? profile.company_name : profile.full_name)?.trim(),
+      name: customerName(profile),
       cpfCnpj: doc,
       email: profile.email?.trim(),
       mobilePhone: mobile.length === 11 ? mobile : undefined,

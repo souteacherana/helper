@@ -44,35 +44,38 @@ export type BillingProfile = {
 interface FieldDef {
   label: string;
   column: string;
-  /** Obrigatório sempre, só para empresa, ou opcional */
-  required: 'always' | 'PJ' | false;
+  /** Obrigatório sempre, só para pessoa física, só para empresa, ou opcional */
+  required: 'always' | 'PF' | 'PJ' | false;
 }
 
 /**
- * Ordem = ordem dos avisos de "falta". Os obrigatórios precisam bater com
- * public.billing_missing() no supabase_schema.sql (seção 9).
+ * Ordem = ordem dos avisos de "falta". Obrigatórios (termo de adesão da Imersão): nome, CPF
+ * (ou CNPJ, se empresa), e-mail e telefone. Precisam bater com public.billing_missing() no
+ * supabase_schema.sql (seção 9).
  */
 export const BILLING_FIELDS: Record<BillingField, FieldDef> = {
-  companyName: { label: 'Razão social', column: 'company_name', required: 'PJ' },
+  companyName: { label: 'Razão social', column: 'company_name', required: false },
   tradeName: { label: 'Nome fantasia', column: 'trade_name', required: false },
   cnpj: { label: 'CNPJ', column: 'cnpj', required: 'PJ' },
   fullName: { label: 'Nome', column: 'full_name', required: 'always' },
-  cpf: { label: 'CPF', column: 'cpf', required: 'always' },
+  cpf: { label: 'CPF', column: 'cpf', required: 'PF' },
   rg: { label: 'RG', column: 'rg', required: false },
-  nationality: { label: 'Nacionalidade', column: 'nationality', required: 'always' },
-  maritalStatus: { label: 'Estado civil', column: 'marital_status', required: 'always' },
+  nationality: { label: 'Nacionalidade', column: 'nationality', required: false },
+  maritalStatus: { label: 'Estado civil', column: 'marital_status', required: false },
   email: { label: 'E-mail', column: 'email', required: 'always' },
   phone: { label: 'Telefone', column: 'phone', required: 'always' },
-  zipCode: { label: 'CEP', column: 'zip_code', required: 'always' },
-  street: { label: 'Rua', column: 'street', required: 'always' },
-  addressNumber: { label: 'Número', column: 'address_number', required: 'always' },
+  zipCode: { label: 'CEP', column: 'zip_code', required: false },
+  street: { label: 'Rua', column: 'street', required: false },
+  addressNumber: { label: 'Número', column: 'address_number', required: false },
   complement: { label: 'Complemento', column: 'complement', required: false },
-  district: { label: 'Bairro', column: 'district', required: 'always' },
-  city: { label: 'Cidade', column: 'city', required: 'always' },
-  state: { label: 'Estado', column: 'state', required: 'always' }
+  district: { label: 'Bairro', column: 'district', required: false },
+  city: { label: 'Cidade', column: 'city', required: false },
+  state: { label: 'Estado', column: 'state', required: false }
 };
 
 const FIELD_KEYS = Object.keys(BILLING_FIELDS) as BillingField[];
+/** Campos que só existem na ficha de empresa */
+const COMPANY_FIELDS: BillingField[] = ['companyName', 'tradeName', 'cnpj'];
 
 export const BILLING_SOURCE_LABELS: Record<BillingSource, string> = {
   helper: 'HELPER',
@@ -105,23 +108,28 @@ export function newBillingProfile(attendee: Attendee): BillingProfile {
   };
 }
 
-const isRequired = (key: BillingField, personType: PersonType) => {
+export const isRequiredField = (key: BillingField, personType: PersonType) => {
   const rule = BILLING_FIELDS[key].required;
-  return rule === 'always' || (rule === 'PJ' && personType === 'PJ');
+  return rule === 'always' || rule === personType;
 };
 
 /** Nomes dos campos obrigatórios em branco. Lista vazia = ficha completa. */
 export function missingBillingFields(profile: BillingProfile): string[] {
-  return FIELD_KEYS.filter(k => isRequired(k, profile.personType) && !profile[k].trim()).map(k => BILLING_FIELDS[k].label);
+  return FIELD_KEYS.filter(k => isRequiredField(k, profile.personType) && !profile[k].trim()).map(k => BILLING_FIELDS[k].label);
 }
 
 /**
- * O que falta só para cobrar no Asaas (o cliente é a empresa, no caso de PJ). O resto da ficha
- * é para o contrato. Mesma regra de public.billing_missing_charge() no supabase_schema.sql (seção 10).
+ * O que falta só para cobrar no Asaas: nome, CPF (ou CNPJ) e e-mail. Na empresa sem razão social,
+ * a cobrança sai no nome do representante. Mesma regra de public.billing_missing_charge() no
+ * supabase_schema.sql (seção 10).
  */
 export function missingForCharge(profile: BillingProfile): string[] {
-  const keys: BillingField[] = profile.personType === 'PJ' ? ['companyName', 'cnpj', 'email'] : ['fullName', 'cpf', 'email'];
-  return keys.filter(k => !profile[k].trim()).map(k => BILLING_FIELDS[k].label);
+  const isPJ = profile.personType === 'PJ';
+  const missing: string[] = [];
+  if (!(isPJ ? profile.companyName.trim() || profile.fullName.trim() : profile.fullName.trim())) missing.push('Nome');
+  if (!(isPJ ? profile.cnpj : profile.cpf).trim()) missing.push(isPJ ? 'CNPJ' : 'CPF');
+  if (!profile.email.trim()) missing.push('E-mail');
+  return missing;
 }
 
 // ---------- Validação ----------
@@ -185,7 +193,7 @@ export function validateBillingField(key: BillingField, value: string): string |
 export function billingErrors(profile: BillingProfile): Partial<Record<BillingField, string>> {
   const errors: Partial<Record<BillingField, string>> = {};
   for (const key of FIELD_KEYS) {
-    if (BILLING_FIELDS[key].required === 'PJ' && profile.personType !== 'PJ') continue;
+    if (COMPANY_FIELDS.includes(key) && profile.personType !== 'PJ') continue;
     const message = validateBillingField(key, profile[key]);
     if (message) errors[key] = message;
   }
@@ -267,8 +275,7 @@ export function billingToRow(profile: BillingProfile): BillingRow {
     sources: profile.sources
   };
   for (const key of FIELD_KEYS) {
-    const companyOnly = key === 'companyName' || key === 'tradeName' || key === 'cnpj';
-    const value = companyOnly && profile.personType === 'PF' ? '' : profile[key].trim();
+    const value = COMPANY_FIELDS.includes(key) && profile.personType === 'PF' ? '' : profile[key].trim();
     row[BILLING_FIELDS[key].column] = value || null;
   }
   return row;

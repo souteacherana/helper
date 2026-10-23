@@ -102,10 +102,10 @@ export function useSales() {
     );
   }, []);
 
-  // Modo demonstração: todas as fichas prontas para cobrança, faltando os dados do contrato
+  // Modo demonstração: todas as fichas prontas para cobrança e contrato
   useEffect(() => {
     if (supabase) return;
-    const demo: BillingStatus = { personType: 'PF', missing: ['Nacionalidade', 'Estado civil'], missingForCharge: [] };
+    const demo: BillingStatus = { personType: 'PF', missing: [], missingForCharge: [] };
     setBilling(new Map(attendees.map(a => [a.id, demo])));
   }, [attendees]);
 

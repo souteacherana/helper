@@ -433,3 +433,81 @@ END $$;
 
 ALTER TABLE public.attendees ADD CONSTRAINT attendees_accompanied_by_check
   CHECK (accompanied_by IS NULL OR accompanied_by IN ('Esposo(a)', 'Familiar', 'Professor parceiro', 'Colaborador', 'Amigo'));
+
+-- ========================================================
+-- 9. Dados de cobrança e contrato (vendas na Imersão)
+--    Ficha separada da ficha comercial, com os campos que o jurídico usa no contrato.
+--    CPF, RG e endereço: só o admin lê e edita. Os closers usam billing_status(),
+--    que diz só se a ficha está completa (e o que falta), sem nenhum dado pessoal.
+--    Na empresa (PJ), os campos de pessoa são do representante que assina.
+-- ========================================================
+CREATE TABLE IF NOT EXISTS public.billing_profiles (
+  attendee_id TEXT PRIMARY KEY REFERENCES public.attendees(id) ON DELETE CASCADE,
+  person_type TEXT NOT NULL DEFAULT 'PF' CHECK (person_type IN ('PF', 'PJ')),
+  full_name TEXT,
+  nationality TEXT,
+  marital_status TEXT,
+  rg TEXT,
+  cpf TEXT,
+  email TEXT,
+  phone TEXT,
+  street TEXT,
+  address_number TEXT,
+  complement TEXT,
+  district TEXT,
+  city TEXT,
+  state TEXT,
+  zip_code TEXT,
+  cnpj TEXT,
+  company_name TEXT,
+  trade_name TEXT,
+  asaas_customer_id TEXT,
+  -- De onde veio cada campo, ex: {"cpf": "asaas", "rg": "d4sign", "email": "manual"}
+  sources JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.billing_profiles ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "billing_admin" ON public.billing_profiles;
+CREATE POLICY "billing_admin" ON public.billing_profiles
+  FOR ALL TO authenticated
+  USING (public.app_role() = 'ADMIN') WITH CHECK (public.app_role() = 'ADMIN');
+
+-- Campos obrigatórios que faltam (mesma regra de missingBillingFields em src/lib/billing.ts)
+CREATE OR REPLACE FUNCTION public.billing_missing(p public.billing_profiles)
+RETURNS TEXT[]
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT array_remove(ARRAY[
+    CASE WHEN p.person_type = 'PJ' AND coalesce(trim(p.company_name), '') = '' THEN 'Razão social' END,
+    CASE WHEN p.person_type = 'PJ' AND coalesce(trim(p.cnpj), '') = '' THEN 'CNPJ' END,
+    CASE WHEN coalesce(trim(p.full_name), '') = '' THEN 'Nome' END,
+    CASE WHEN coalesce(trim(p.cpf), '') = '' THEN 'CPF' END,
+    CASE WHEN coalesce(trim(p.rg), '') = '' THEN 'RG' END,
+    CASE WHEN coalesce(trim(p.nationality), '') = '' THEN 'Nacionalidade' END,
+    CASE WHEN coalesce(trim(p.marital_status), '') = '' THEN 'Estado civil' END,
+    CASE WHEN coalesce(trim(p.email), '') = '' THEN 'E-mail' END,
+    CASE WHEN coalesce(trim(p.phone), '') = '' THEN 'Telefone' END,
+    CASE WHEN coalesce(trim(p.zip_code), '') = '' THEN 'CEP' END,
+    CASE WHEN coalesce(trim(p.street), '') = '' THEN 'Rua' END,
+    CASE WHEN coalesce(trim(p.address_number), '') = '' THEN 'Número' END,
+    CASE WHEN coalesce(trim(p.district), '') = '' THEN 'Bairro' END,
+    CASE WHEN coalesce(trim(p.city), '') = '' THEN 'Cidade' END,
+    CASE WHEN coalesce(trim(p.state), '') = '' THEN 'Estado' END
+  ], NULL)
+$$;
+
+-- Equipe: situação da ficha de cada participante, sem nenhum dado pessoal
+CREATE OR REPLACE FUNCTION public.billing_status()
+RETURNS TABLE (attendee_id TEXT, person_type TEXT, missing TEXT[])
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT a.id,
+         coalesce(b.person_type, 'PF'),
+         CASE WHEN b.attendee_id IS NULL THEN ARRAY['Ficha vazia'] ELSE public.billing_missing(b) END
+  FROM public.attendees a
+  LEFT JOIN public.billing_profiles b ON b.attendee_id = a.id
+  WHERE public.app_role() IN ('CLOSER', 'ADMIN')
+$$;
+
+REVOKE ALL ON FUNCTION public.billing_status() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.billing_status() TO authenticated;

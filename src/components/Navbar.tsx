@@ -1,7 +1,7 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, Users, Shield, ShieldCheck, CheckCircle2, Map as MapIcon } from 'lucide-react';
+import { LogOut, Users, Shield, ShieldCheck, CheckCircle2, Map as MapIcon, Wallet } from 'lucide-react';
 import { getBadgeLevel } from '../types/index';
 
 export const Navbar: React.FC = () => {
@@ -17,7 +17,9 @@ export const Navbar: React.FC = () => {
   const navItems = [
     ...(isTeam ? [{ path: '/closers', label: 'Closers', icon: Users }, { path: '/mapa', label: 'Mapa', icon: MapIcon }] : []),
     ...(userSession.role ? [{ path: '/recepcao', label: 'Recepção', icon: Shield }] : []),
-    ...(userSession.role === 'ADMIN' ? [{ path: '/admin', label: 'Admin', icon: ShieldCheck }] : [])
+    ...(userSession.role === 'ADMIN'
+      ? [{ path: '/admin', label: 'Admin', icon: ShieldCheck }, { path: '/cobranca', label: 'Cobrança', icon: Wallet }]
+      : [])
   ];
 
   const presentCount = attendees.filter(a => a.isPresent).length;

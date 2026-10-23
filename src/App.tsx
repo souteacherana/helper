@@ -8,6 +8,7 @@ import { RecepcaoPage } from './pages/RecepcaoPage';
 import { AdminPage } from './pages/AdminPage';
 import { MapPage } from './pages/MapPage';
 import { QrSheetPage } from './pages/QrSheetPage';
+import { CobrancaPage } from './pages/CobrancaPage';
 import { PublicBadgePage } from './pages/PublicBadgePage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { StatusToast } from './components/StatusToast';
@@ -58,6 +59,15 @@ export const App: React.FC = () => {
                 element={
                   <ProtectedRoute allowedRoles={['ADMIN']}>
                     <QrSheetPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/cobranca"
+                element={
+                  <ProtectedRoute allowedRoles={['ADMIN']}>
+                    <CobrancaPage />
                   </ProtectedRoute>
                 }
               />

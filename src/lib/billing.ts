@@ -8,8 +8,11 @@ import { formatPhoneInput } from './format';
  */
 export type PersonType = 'PF' | 'PJ';
 
-/** De onde veio o valor: HELPER (ficha do evento), Asaas, contrato antigo na D4Sign ou digitado no admin */
-export type BillingSource = 'helper' | 'asaas' | 'd4sign' | 'manual';
+/**
+ * De onde veio o valor: HELPER (ficha do evento), Asaas, contrato antigo na D4Sign, grupo da
+ * equipe no WhatsApp ou digitado no admin
+ */
+export type BillingSource = 'helper' | 'asaas' | 'd4sign' | 'whatsapp' | 'manual';
 
 export type BillingField =
   | 'companyName'
@@ -75,6 +78,7 @@ export const BILLING_SOURCE_LABELS: Record<BillingSource, string> = {
   helper: 'HELPER',
   asaas: 'Asaas',
   d4sign: 'D4Sign',
+  whatsapp: 'WhatsApp',
   manual: 'Manual'
 };
 

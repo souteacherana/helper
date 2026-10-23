@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import type { Attendee } from '../types/index';
 import type { SalesApi } from '../hooks/useSales';
 import { ProposalSheet } from './ProposalSheet';
-import { SALE_STATUS_LABELS, formatBRL, isClosedSale, type SaleStatus } from '../lib/sales';
+import { SALE_STATUS_LABELS, chargedCents, formatBRL, isClosedSale, type SaleStatus } from '../lib/sales';
 
 const STATUS_DOT: Record<SaleStatus, string> = {
   CREATING: 'bg-slate-300',
@@ -25,13 +25,13 @@ export const SalesPanel: React.FC<{ salesApi: SalesApi; closerName: string }> = 
   const sales = salesApi.sales;
   const closed = sales.filter(s => isClosedSale(s.status));
   const pending = sales.filter(s => s.status === 'PENDING');
-  const closedTotal = closed.reduce((acc, s) => acc + s.totalCents, 0);
+  const closedTotal = closed.reduce((acc, s) => acc + chargedCents(s), 0);
 
   const byCloser = useMemo(() => {
     const map = new Map<string, { count: number; cents: number }>();
     for (const s of closed) {
       const cur = map.get(s.closerName) ?? { count: 0, cents: 0 };
-      map.set(s.closerName, { count: cur.count + 1, cents: cur.cents + s.totalCents });
+      map.set(s.closerName, { count: cur.count + 1, cents: cur.cents + chargedCents(s) });
     }
     return [...map.entries()].sort((a, b) => b[1].cents - a[1].cents);
   }, [closed]);
@@ -49,7 +49,7 @@ export const SalesPanel: React.FC<{ salesApi: SalesApi; closerName: string }> = 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <p className="text-xs font-semibold text-slate-500">Aguardando entrada</p>
           <p className="text-2xl font-extrabold text-amber-600">{pending.length}</p>
-          <p className="text-xs font-semibold text-slate-600">{formatBRL(pending.reduce((acc, s) => acc + s.totalCents, 0))}</p>
+          <p className="text-xs font-semibold text-slate-600">{formatBRL(pending.reduce((acc, s) => acc + chargedCents(s), 0))}</p>
         </div>
       </div>
 
@@ -89,7 +89,7 @@ export const SalesPanel: React.FC<{ salesApi: SalesApi; closerName: string }> = 
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-slate-900 truncate">{person?.name ?? 'Participante removido'}</p>
                     <p className="text-xs text-slate-500 truncate">
-                      {sale.offerName} · {formatBRL(sale.totalCents)} · {sale.closerName}
+                      {sale.offerName} · {formatBRL(chargedCents(sale))} · {sale.closerName}
                     </p>
                   </div>
                   <span className="text-[11px] font-bold text-slate-600 shrink-0 flex items-center gap-1">

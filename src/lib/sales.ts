@@ -12,6 +12,21 @@ export const PAY_METHODS: PayMethod[] = ['PIX', 'CREDIT_CARD', 'BOLETO'];
 export const METHOD_LABELS: Record<PayMethod, string> = { PIX: 'Pix', BOLETO: 'Boleto', CREDIT_CARD: 'Cartão' };
 /** Cartão até 12x, boleto até 6x, Pix à vista */
 export const MAX_INSTALLMENTS: Record<PayMethod, number> = { PIX: 1, BOLETO: 6, CREDIT_CARD: 12 };
+/** Só o Mastermind: até 14x sem juros em qualquer forma (contrato do Mastermind) */
+const OFFER_MAX_INSTALLMENTS: Record<string, Record<PayMethod, number>> = {
+  mastermind: { PIX: 14, BOLETO: 14, CREDIT_CARD: 14 }
+};
+export const maxInstallments = (offerId: string, method: PayMethod) =>
+  (OFFER_MAX_INSTALLMENTS[offerId] ?? MAX_INSTALLMENTS)[method];
+
+/** Pix à vista (pagamento único no Pix) tem 5% de desconto sobre o total */
+export const PIX_CASH_DISCOUNT = 0.05;
+export const isPixCash = (parts: Pick<PartDraft, 'method' | 'installments'>[]) =>
+  parts.length === 1 && parts[0].method === 'PIX' && parts[0].installments === 1;
+export const pixCashCents = (totalCents: number) => Math.round(totalCents * (1 - PIX_CASH_DISCOUNT));
+/** Quanto as partes precisam somar: o total, ou o total com desconto no Pix à vista */
+export const expectedCents = (totalCents: number, parts: Pick<PartDraft, 'method' | 'installments'>[]) =>
+  isPixCash(parts) ? pixCashCents(totalCents) : totalCents;
 export const MAX_PARTS = 4;
 /** Multa fixa (R$) do boleto pago depois do vencimento */
 export const BOLETO_FINE = 40;
@@ -123,7 +138,7 @@ export function addDays(isoDate: string, days: number): string {
 // ---------- Validação ----------
 
 /** Lista de problemas da divisão (vazia = pode gerar as cobranças). */
-export function validateParts(totalCents: number, parts: PartDraft[], today: string): string[] {
+export function validateParts(totalCents: number, parts: PartDraft[], today: string, offerId = ''): string[] {
   const errors: string[] = [];
   if (parts.length === 0) return ['Adicione pelo menos uma forma de pagamento.'];
   if (parts.length > MAX_PARTS) errors.push(`No máximo ${MAX_PARTS} partes.`);
@@ -131,7 +146,7 @@ export function validateParts(totalCents: number, parts: PartDraft[], today: str
 
   parts.forEach((part, i) => {
     const label = parts.length === 1 ? 'Pagamento' : i === 0 ? 'Entrada' : `Parte ${i + 1}`;
-    const max = MAX_INSTALLMENTS[part.method];
+    const max = MAX_INSTALLMENTS[part.method] && maxInstallments(offerId, part.method);
     if (!max) {
       errors.push(`${label}: forma de pagamento inválida.`);
       return;
@@ -146,9 +161,10 @@ export function validateParts(totalCents: number, parts: PartDraft[], today: str
     else if (part.dueDate > lastDue) errors.push(`${label}: vencimento em até ${MAX_DUE_DAYS} dias.`);
   });
 
+  const target = expectedCents(totalCents, parts);
   const sum = parts.reduce((acc, p) => acc + (Number.isInteger(p.amountCents) ? p.amountCents : 0), 0);
-  if (sum !== totalCents) {
-    errors.push(sum < totalCents ? `Faltam ${formatBRL(totalCents - sum)} para fechar o total.` : `Passou ${formatBRL(sum - totalCents)} do total.`);
+  if (sum !== target) {
+    errors.push(sum < target ? `Faltam ${formatBRL(target - sum)} para fechar o total.` : `Passou ${formatBRL(sum - target)} do total.`);
   }
   return errors;
 }
@@ -247,6 +263,9 @@ export const partFromRow = (r: SalePartRow): SalePart => ({
   asaasPaymentId: r.asaas_payment_id ?? '',
   asaasInstallmentId: r.asaas_installment_id ?? ''
 });
+
+/** Quanto a venda cobra de fato (no Pix à vista, o total com desconto) */
+export const chargedCents = (sale: Pick<Sale, 'parts'>) => sale.parts.reduce((acc, p) => acc + p.amountCents, 0);
 
 export const saleFromRow = (r: SaleRow, parts: SalePart[]): Sale => ({
   id: r.id,

@@ -134,7 +134,7 @@ export async function handleCreateSale(authorization: string | null, input: unkn
   }
 
   const totalCents = toCents(offer.total_value);
-  const problems = validateParts(totalCents, parts, todaySaoPaulo());
+  const problems = validateParts(totalCents, parts, todaySaoPaulo(), offerId);
   if (problems.length) return fail(400, problems.join(' '));
 
   const [{ data: attendee }, { data: profile }, { data: openSales }] = await Promise.all([

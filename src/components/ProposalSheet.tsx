@@ -22,14 +22,18 @@ import { BadgePill } from './BadgePill';
 import type { SalesApi } from '../hooks/useSales';
 import { buildWhatsAppUrl, formatCurrencyInput, formatDateBR } from '../lib/format';
 import {
-  MAX_INSTALLMENTS,
   MAX_PARTS,
   METHOD_LABELS,
   PART_STATUS_LABELS,
   PAY_METHODS,
   SALE_STATUS_LABELS,
+  chargedCents,
+  expectedCents,
   formatBRL,
   installmentText,
+  isPixCash,
+  maxInstallments,
+  pixCashCents,
   isClosedSale,
   isOpenSale,
   parseBRL,
@@ -70,7 +74,7 @@ const SALE_STATUS_STYLE: Record<SaleStatus, string> = {
 const toDraft = (p: PartForm): PartDraft => ({
   method: p.method,
   amountCents: parseBRL(p.amount),
-  installments: p.method === 'PIX' ? 1 : p.installments,
+  installments: p.installments,
   dueDate: p.dueDate
 });
 
@@ -186,7 +190,8 @@ const SaleCard: React.FC<{ sale: Sale; attendee: Attendee; salesApi: SalesApi; h
         <div className="min-w-0">
           <p className="text-sm font-extrabold text-slate-900">{sale.offerName}</p>
           <p className="text-xs text-slate-500">
-            {formatBRL(sale.totalCents)} · {sale.closerName} · {new Date(sale.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+            {formatBRL(chargedCents(sale))}
+            {chargedCents(sale) < sale.totalCents ? ' (Pix à vista −5%)' : ''} · {sale.closerName} · {new Date(sale.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
           </p>
         </div>
         <span className={`shrink-0 text-[11px] font-bold px-2 py-1 rounded-md border flex items-center gap-1 ${SALE_STATUS_STYLE[sale.status]}`}>
@@ -250,15 +255,25 @@ const Composer: React.FC<{
 
   const drafts = parts.map(toDraft);
   const used = drafts.reduce((acc, p) => acc + (Number.isFinite(p.amountCents) ? p.amountCents : 0), 0);
-  const remaining = total - used;
-  const errors = validateParts(total, drafts.map(d => ({ ...d, amountCents: Number.isFinite(d.amountCents) ? d.amountCents : 0 })), today);
+  const pixCash = isPixCash(drafts);
+  const remaining = expectedCents(total, drafts) - used;
+  // Com mais de uma parte não há desconto de Pix à vista: a parte nova completa o total cheio
+  const remainingForNewPart = total - used;
+  const errors = validateParts(total, drafts.map(d => ({ ...d, amountCents: Number.isFinite(d.amountCents) ? d.amountCents : 0 })), today, offer.id);
 
   const update = (i: number, patch: Partial<PartForm>) =>
     setParts(prev =>
       prev.map((p, idx) => {
         if (idx !== i) return p;
         const next = { ...p, ...patch };
-        next.installments = Math.min(Math.max(1, next.installments), MAX_INSTALLMENTS[next.method]);
+        next.installments = Math.min(Math.max(1, next.installments), maxInstallments(offer.id, next.method));
+        // Pagamento único: ao trocar para/de Pix à vista, o valor acompanha o desconto de 5%
+        if (prev.length === 1 && patch.method && patch.method !== p.method) {
+          const amount = parseBRL(p.amount);
+          const pixValue = pixCashCents(total);
+          if (patch.method === 'PIX' && next.installments === 1 && (!p.amount || amount === total)) next.amount = formatBRL(pixValue);
+          else if (p.method === 'PIX' && amount === pixValue) next.amount = formatBRL(total);
+        }
         return next;
       })
     );
@@ -266,7 +281,7 @@ const Composer: React.FC<{
   const addPart = () =>
     setParts(prev => [
       ...prev,
-      { method: 'CREDIT_CARD', amount: remaining > 0 ? formatBRL(remaining) : '', installments: MAX_INSTALLMENTS.CREDIT_CARD, dueDate: today }
+      { method: 'CREDIT_CARD', amount: remainingForNewPart > 0 ? formatBRL(remainingForNewPart) : '', installments: maxInstallments(offer.id, 'CREDIT_CARD'), dueDate: today }
     ]);
 
   const submit = async () => {
@@ -289,12 +304,13 @@ const Composer: React.FC<{
       <div className="rounded-2xl bg-slate-900 text-white p-4">
         <p className="text-xs font-semibold text-slate-300">{offer.name}</p>
         <p className="text-2xl font-extrabold tracking-tight">{formatBRL(total)}</p>
+        <p className="text-xs text-emerald-300 font-semibold">Pix à vista (5% de desconto): {formatBRL(pixCashCents(total))}</p>
         {offer.condition && <p className="text-xs text-slate-300 mt-1">{offer.condition}</p>}
       </div>
 
       <div className="space-y-3">
         {parts.map((part, i) => {
-          const max = MAX_INSTALLMENTS[part.method];
+          const max = maxInstallments(offer.id, part.method);
           const draft = drafts[i];
           return (
             <div key={i} className="rounded-xl border border-slate-200 p-3 space-y-2.5">
@@ -311,7 +327,7 @@ const Composer: React.FC<{
                   <button
                     key={m}
                     type="button"
-                    onClick={() => update(i, { method: m, installments: m === part.method ? part.installments : MAX_INSTALLMENTS[m] })}
+                    onClick={() => update(i, { method: m, installments: m === part.method ? part.installments : m === 'PIX' ? 1 : maxInstallments(offer.id, m) })}
                     aria-pressed={part.method === m}
                     className={`py-2 rounded-lg text-xs font-bold transition ${part.method === m ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500'}`}
                   >
@@ -331,7 +347,7 @@ const Composer: React.FC<{
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-slate-900"
                   />
                 </label>
-                {part.method === 'PIX' ? (
+                {max === 1 ? (
                   <div className="flex flex-col gap-1 text-[11px] font-bold text-slate-600">
                     Parcelas
                     <span className="px-3 py-2.5 text-sm font-semibold text-slate-500">À vista</span>
@@ -365,6 +381,7 @@ const Composer: React.FC<{
                 </label>
               </div>
               {part.method === 'BOLETO' && <p className="text-[11px] text-slate-500">Boleto pago depois do vencimento tem multa de R$ 40.</p>}
+              {pixCash && <p className="text-[11px] font-semibold text-emerald-700">Pix à vista: total com 5% de desconto ({formatBRL(pixCashCents(total))}).</p>}
             </div>
           );
         })}
@@ -376,7 +393,7 @@ const Composer: React.FC<{
             className="w-full py-2.5 rounded-xl border border-dashed border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50 flex items-center justify-center gap-1.5"
           >
             <Plus className="w-4 h-4" />
-            {remaining > 0 ? `Adicionar forma de pagamento para o restante (${formatBRL(remaining)})` : 'Adicionar forma de pagamento'}
+            {remainingForNewPart > 0 ? `Adicionar forma de pagamento para o restante (${formatBRL(remainingForNewPart)})` : 'Adicionar forma de pagamento'}
           </button>
         )}
       </div>

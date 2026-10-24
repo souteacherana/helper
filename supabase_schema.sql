@@ -634,3 +634,20 @@ $$;
 
 REVOKE ALL ON FUNCTION public.billing_status() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.billing_status() TO authenticated;
+
+-- ========================================================
+-- 11. Contratos (D4Sign)
+--    Cada produto aponta para o seu modelo .docx (com campos [[...]]). Quando a entrada é paga,
+--    o servidor preenche o modelo, sobe no cofre "Imersão Rise 2026" e envia para o cliente assinar
+--    (a Ana e as testemunhas já vêm pré-assinadas). A situação fica na própria venda.
+-- ========================================================
+ALTER TABLE public.offers ADD COLUMN IF NOT EXISTS contract_template_url TEXT;
+
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS contract_status TEXT NOT NULL DEFAULT 'NONE'
+  CHECK (contract_status IN ('NONE', 'CREATING', 'SENT', 'SIGNED', 'CANCELLED', 'FAILED'));
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS contract_uuid TEXT;
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS contract_error TEXT;
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS contract_sent_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS contract_signed_at TIMESTAMP WITH TIME ZONE;
+
+CREATE INDEX IF NOT EXISTS sales_contract_uuid_idx ON public.sales (contract_uuid);

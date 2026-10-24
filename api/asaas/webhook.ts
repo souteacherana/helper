@@ -10,7 +10,9 @@
  * 200 mesmo assim para não travar a fila; o botão "Atualizar" da proposta confere de novo.
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { waitUntil } from '@vercel/functions';
 import { asaasClient } from '../_lib/asaas.js';
+import { generateContract, needsContract } from '../_lib/contracts.js';
 import { adminDb } from '../_lib/server.js';
 import { syncSalePart } from '../_lib/salesSync.js';
 import { parseReference } from '../../src/lib/sales.js';
@@ -48,7 +50,12 @@ export async function handleAsaasWebhook(token: string | null, input: unknown, e
   if (!ref) return { status: 200, body: { received: true, processed: false } };
 
   try {
-    await syncSalePart(adminDb(env), asaasClient(env), ref.saleId, ref.position);
+    const db = adminDb(env);
+    await syncSalePart(db, asaasClient(env), ref.saleId, ref.position);
+    // Entrada paga: o contrato é gerado e enviado em segundo plano (a resposta ao Asaas não espera)
+    if (await needsContract(db, ref.saleId)) {
+      waitUntil(generateContract(db, env, ref.saleId).catch(e => console.error('contrato automático falhou:', e)));
+    }
   } catch (err) {
     console.error(`Asaas webhook: falha ao atualizar ${ref.saleId}/${ref.position} (${event}):`, err);
     return { status: 200, body: { received: true, processed: false } };

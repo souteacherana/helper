@@ -12,7 +12,8 @@ const OfferEditor: React.FC<{ offer: Offer; salesApi: SalesApi }> = ({ offer, sa
     total: offer.totalCents === null ? '' : formatBRL(offer.totalCents),
     condition: offer.condition,
     active: offer.active,
-    restricted: offer.restricted
+    restricted: offer.restricted,
+    contractTemplateUrl: offer.contractTemplateUrl
   });
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
@@ -24,7 +25,8 @@ const OfferEditor: React.FC<{ offer: Offer; salesApi: SalesApi }> = ({ offer, sa
     totalCents !== offer.totalCents ||
     form.condition !== offer.condition ||
     form.active !== offer.active ||
-    form.restricted !== offer.restricted;
+    form.restricted !== offer.restricted ||
+    form.contractTemplateUrl !== offer.contractTemplateUrl;
 
   const allowed = useMemo(() => salesApi.access.get(offer.id) ?? new Set<string>(), [salesApi.access, offer.id]);
   const listed = useMemo(
@@ -36,7 +38,15 @@ const OfferEditor: React.FC<{ offer: Offer; salesApi: SalesApi }> = ({ offer, sa
   const save = async () => {
     if (invalidTotal || !form.name.trim()) return;
     setSaving(true);
-    await salesApi.saveOffer({ ...offer, name: form.name, totalCents, condition: form.condition, active: form.active, restricted: form.restricted });
+    await salesApi.saveOffer({
+      ...offer,
+      name: form.name,
+      totalCents,
+      condition: form.condition,
+      active: form.active,
+      restricted: form.restricted,
+      contractTemplateUrl: form.contractTemplateUrl
+    });
     setSaving(false);
   };
 
@@ -75,6 +85,19 @@ const OfferEditor: React.FC<{ offer: Offer; salesApi: SalesApi }> = ({ offer, sa
             value={form.condition}
             onChange={e => setForm({ ...form, condition: e.target.value })}
             placeholder="Ex: 12 meses de mentoria pelo preço de 10"
+            className={input}
+          />
+        </label>
+        <label className="sm:col-span-2 flex flex-col gap-1 text-[11px] font-bold text-slate-600">
+          <span>
+            Modelo do contrato (.docx com campos [[...]]){' '}
+            {offer.contractTemplateUrl ? <span className="text-emerald-700">· configurado</span> : <span className="text-amber-700">· sem modelo, o contrato não é gerado</span>}
+          </span>
+          <input
+            type="url"
+            placeholder="Link do modelo no Blob"
+            value={form.contractTemplateUrl}
+            onChange={e => setForm({ ...form, contractTemplateUrl: e.target.value })}
             className={input}
           />
         </label>

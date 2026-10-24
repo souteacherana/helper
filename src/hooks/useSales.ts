@@ -34,9 +34,9 @@ export interface CreateSaleInput {
 
 // Modo demonstração (sem Supabase): produtos de exemplo e vendas só na memória
 const DEMO_OFFERS: Offer[] = [
-  { id: 'partiu10k', name: 'Partiu 10K', totalCents: 479640, condition: 'Exemplo: condição especial da Imersão', restricted: false, active: true, sortOrder: 1 },
-  { id: 'elite', name: 'Professores de Elite', totalCents: 1200000, condition: 'Exemplo: 12 meses de mentoria', restricted: false, active: true, sortOrder: 2 },
-  { id: 'mastermind', name: 'Mastermind', totalCents: null, condition: '', restricted: true, active: true, sortOrder: 3 }
+  { id: 'partiu10k', name: 'Partiu 10K', totalCents: 479640, condition: 'Exemplo: condição especial da Imersão', restricted: false, active: true, sortOrder: 1, contractTemplateUrl: '' },
+  { id: 'elite', name: 'Professores de Elite', totalCents: 1200000, condition: 'Exemplo: 12 meses de mentoria', restricted: false, active: true, sortOrder: 2, contractTemplateUrl: '' },
+  { id: 'mastermind', name: 'Mastermind', totalCents: null, condition: '', restricted: true, active: true, sortOrder: 3, contractTemplateUrl: '' }
 ];
 
 /** Propostas e vendas da equipe: produtos, vendas com as partes e situação das fichas de cobrança. */
@@ -167,6 +167,10 @@ export function useSales() {
         error: '',
         createdAt: new Date().toISOString(),
         entryPaidAt: null,
+        contractStatus: 'NONE',
+        contractError: '',
+        contractSentAt: null,
+        contractSignedAt: null,
         parts: input.parts.map((p, position) => ({
           ...p,
           position,
@@ -202,6 +206,22 @@ export function useSales() {
     return typeof result.error === 'string' ? result.error : null;
   };
 
+  /** Gera e envia o contrato (normalmente já sai sozinho quando a entrada é paga) */
+  const generateContract = async (saleId: string): Promise<string | null> => {
+    if (!supabase) return 'No modo demonstração não há D4Sign.';
+    const result = await callApi('/api/contracts/create', { saleId });
+    await fetchSales();
+    return typeof result.error === 'string' ? result.error : null;
+  };
+
+  /** Confere na D4Sign se o cliente já assinou */
+  const syncContract = async (saleId: string): Promise<string | null> => {
+    if (!supabase) return null;
+    const result = await callApi('/api/contracts/sync', { saleId });
+    await fetchSales();
+    return typeof result.error === 'string' ? result.error : null;
+  };
+
   // ---------- Admin: produtos ----------
 
   const saveOffer = async (offer: Offer): Promise<boolean> => {
@@ -217,6 +237,7 @@ export function useSales() {
         condition: offer.condition.trim() || null,
         restricted: offer.restricted,
         active: offer.active,
+        contract_template_url: offer.contractTemplateUrl.trim() || null,
         updated_at: new Date().toISOString()
       })
       .eq('id', offer.id);
@@ -261,6 +282,8 @@ export function useSales() {
     createSale,
     cancelSale,
     syncSale,
+    generateContract,
+    syncContract,
     saveOffer,
     setOfferAccess,
     refreshBilling: fetchBilling,

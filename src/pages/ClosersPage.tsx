@@ -340,6 +340,7 @@ export const ClosersPage: React.FC = () => {
                         <span key={sale.id} className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-600 text-white flex items-center gap-1">
                           <CheckCircle2 className="w-3 h-3" />
                           Vendido: {sale.offerName}
+                          {sale.contractStatus === 'SIGNED' ? ' · contrato assinado' : sale.contractStatus === 'SENT' ? ' · contrato enviado' : ''}
                         </span>
                       ) : (
                         <span key={sale.id} className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1">

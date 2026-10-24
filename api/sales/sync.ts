@@ -3,7 +3,9 @@
  * Body: { saleId }
  * Normalmente o webhook já atualiza sozinho; isto cobre um aviso que se perdeu.
  */
+import { waitUntil } from '@vercel/functions';
 import { AsaasError, asaasClient } from '../_lib/asaas.js';
+import { generateContract, needsContract } from '../_lib/contracts.js';
 import { adminDb, json, teamRoleFromRequest } from '../_lib/server.js';
 import { syncSale } from '../_lib/salesSync.js';
 
@@ -19,6 +21,9 @@ export async function handleSyncSale(authorization: string | null, input: unknow
 
   try {
     await syncSale(db, asaasClient(env), saleId);
+    if (await needsContract(db, saleId)) {
+      waitUntil(generateContract(db, env, saleId).catch(e => console.error('contrato automático falhou:', e)));
+    }
   } catch (err) {
     console.error('sync sale failed:', err);
     return fail(502, `Não foi possível consultar o Asaas: ${err instanceof AsaasError ? err.message : 'erro inesperado'}`);

@@ -7,6 +7,16 @@
 export type PayMethod = 'PIX' | 'BOLETO' | 'CREDIT_CARD';
 export type SaleStatus = 'CREATING' | 'PENDING' | 'ENTRY_PAID' | 'PAID' | 'CANCELLED' | 'FAILED';
 export type PartStatus = 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'CANCELLED' | 'REFUNDED';
+export type ContractStatus = 'NONE' | 'CREATING' | 'SENT' | 'SIGNED' | 'CANCELLED' | 'FAILED';
+
+export const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
+  NONE: 'Contrato não gerado',
+  CREATING: 'Gerando contrato…',
+  SENT: 'Contrato enviado para assinatura',
+  SIGNED: 'Contrato assinado',
+  CANCELLED: 'Contrato cancelado',
+  FAILED: 'Erro ao gerar o contrato'
+};
 
 export const PAY_METHODS: PayMethod[] = ['PIX', 'CREDIT_CARD', 'BOLETO'];
 export const METHOD_LABELS: Record<PayMethod, string> = { PIX: 'Pix', BOLETO: 'Boleto', CREDIT_CARD: 'Cartão' };
@@ -73,6 +83,8 @@ export interface Offer {
   restricted: boolean;
   active: boolean;
   sortOrder: number;
+  /** Modelo .docx do contrato (com campos [[...]]) */
+  contractTemplateUrl: string;
 }
 
 export interface SalePart extends PartDraft {
@@ -96,6 +108,10 @@ export interface Sale {
   createdAt: string;
   entryPaidAt: string | null;
   parts: SalePart[];
+  contractStatus: ContractStatus;
+  contractError: string;
+  contractSentAt: string | null;
+  contractSignedAt: string | null;
 }
 
 // ---------- Dinheiro e datas ----------
@@ -212,6 +228,7 @@ export interface OfferRow {
   restricted: boolean;
   active: boolean;
   sort_order: number;
+  contract_template_url?: string | null;
 }
 
 export interface SaleRow {
@@ -225,6 +242,10 @@ export interface SaleRow {
   error: string | null;
   created_at: string;
   entry_paid_at: string | null;
+  contract_status?: ContractStatus;
+  contract_error?: string | null;
+  contract_sent_at?: string | null;
+  contract_signed_at?: string | null;
 }
 
 export interface SalePartRow {
@@ -248,7 +269,8 @@ export const offerFromRow = (r: OfferRow): Offer => ({
   condition: r.condition ?? '',
   restricted: r.restricted,
   active: r.active,
-  sortOrder: r.sort_order
+  sortOrder: r.sort_order,
+  contractTemplateUrl: r.contract_template_url ?? ''
 });
 
 export const partFromRow = (r: SalePartRow): SalePart => ({
@@ -278,5 +300,9 @@ export const saleFromRow = (r: SaleRow, parts: SalePart[]): Sale => ({
   error: r.error ?? '',
   createdAt: r.created_at,
   entryPaidAt: r.entry_paid_at,
-  parts: [...parts].sort((a, b) => a.position - b.position)
+  parts: [...parts].sort((a, b) => a.position - b.position),
+  contractStatus: r.contract_status ?? 'NONE',
+  contractError: r.contract_error ?? '',
+  contractSentAt: r.contract_sent_at ?? null,
+  contractSignedAt: r.contract_signed_at ?? null
 });

@@ -651,3 +651,41 @@ ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS contract_sent_at TIMESTAMP WIT
 ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS contract_signed_at TIMESTAMP WITH TIME ZONE;
 
 CREATE INDEX IF NOT EXISTS sales_contract_uuid_idx ON public.sales (contract_uuid);
+
+-- ========================================================
+-- 12. ICP (classificação dos inscritos pelo formulário)
+--    Nível 1 a 7 (Escola Estruturada → Aspirante), direção de venda, prontidão A/B/C e
+--    perfil DISC, mais as respostas do formulário. Equipe lê; só o admin grava.
+-- ========================================================
+CREATE TABLE IF NOT EXISTS public.attendee_icp (
+  attendee_id TEXT PRIMARY KEY REFERENCES public.attendees(id) ON DELETE CASCADE,
+  icp_level INTEGER CHECK (icp_level BETWEEN 1 AND 7),
+  profile TEXT,
+  direction TEXT,
+  readiness TEXT CHECK (readiness IS NULL OR readiness IN ('A', 'B', 'C')),
+  readiness_score INTEGER,
+  disc TEXT,
+  -- Respostas do formulário: {"Faturamento": "...", "Meta 6–12m": "...", ...}
+  answers JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.attendee_icp ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "icp_select_team" ON public.attendee_icp;
+CREATE POLICY "icp_select_team" ON public.attendee_icp
+  FOR SELECT TO authenticated USING (public.app_role() IN ('CLOSER', 'ADMIN'));
+DROP POLICY IF EXISTS "icp_write_admin" ON public.attendee_icp;
+CREATE POLICY "icp_write_admin" ON public.attendee_icp
+  FOR ALL TO authenticated
+  USING (public.app_role() = 'ADMIN') WITH CHECK (public.app_role() = 'ADMIN');
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'attendee_icp'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.attendee_icp;
+  END IF;
+END $$;

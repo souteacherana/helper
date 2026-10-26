@@ -27,6 +27,9 @@ import { getBadgeLevel, type Attendee } from '../types/index';
 import { FilterSheet } from '../components/FilterSheet';
 import { ProposalSheet } from '../components/ProposalSheet';
 import { ContractSheet } from '../components/ContractSheet';
+import { IcpSheet } from '../components/IcpSheet';
+import { useIcp } from '../hooks/useIcp';
+import { READINESS_STYLE, levelStyle, type Icp } from '../lib/icp';
 import { useSales } from '../hooks/useSales';
 import { isClosedSale, isOpenSale, type Sale } from '../lib/sales';
 import {
@@ -58,6 +61,9 @@ export const ClosersPage: React.FC = () => {
   const [contractFor, setContractFor] = useState<Attendee | null>(null);
   const closeProposal = useCallback(() => setProposalFor(null), []);
   const closeContract = useCallback(() => setContractFor(null), []);
+  const icpMap = useIcp();
+  const [icpFor, setIcpFor] = useState<{ attendee: Attendee; icp: Icp } | null>(null);
+  const closeIcp = useCallback(() => setIcpFor(null), []);
   // Propostas que valem (não canceladas) de cada pessoa, mais recente primeiro
   const salesByAttendee = useMemo(() => {
     const map = new Map<string, Sale[]>();
@@ -245,6 +251,7 @@ export const ClosersPage: React.FC = () => {
             const isExpanded = expandedId === item.id;
             const calculatedBadge = getBadgeLevel(item);
             const itemSales = salesByAttendee.get(item.id) ?? [];
+            const itemIcp = icpMap.get(item.id);
             const whatsappUrl = buildWhatsAppUrl(
               item.phone,
               `Olá ${item.name.split(' ')[0]}! Tudo bem? Sou da equipe da Teacher Ana de Araújo na Imersão Rise...`
@@ -335,6 +342,23 @@ export const ClosersPage: React.FC = () => {
 
                   {/* Context Badges */}
                   <div className="flex flex-wrap items-center gap-1.5 text-xs pt-0.5">
+                    {itemIcp && (
+                      <button
+                        type="button"
+                        onClick={() => setIcpFor({ attendee: item, icp: itemIcp })}
+                        className={`text-[11px] font-bold pl-2 pr-1 py-0.5 rounded border flex items-center gap-1.5 hover:brightness-95 ${levelStyle(itemIcp.level)}`}
+                        title="Ver a classificação completa"
+                      >
+                        <span>
+                          ICP {itemIcp.level ?? '—'}
+                          {itemIcp.profile ? ` · ${itemIcp.profile}` : ''}
+                        </span>
+                        {itemIcp.readiness && (
+                          <span className={`px-1.5 rounded border text-[10px] font-extrabold ${READINESS_STYLE[itemIcp.readiness]}`}>{itemIcp.readiness}</span>
+                        )}
+                      </button>
+                    )}
+
                     {itemSales.map(sale =>
                       isClosedSale(sale.status) ? (
                         <span key={sale.id} className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-600 text-white flex items-center gap-1">
@@ -624,6 +648,7 @@ export const ClosersPage: React.FC = () => {
 
       {proposalFor && <ProposalSheet attendee={proposalFor} salesApi={salesApi} closerName={closerName} onClose={closeProposal} />}
       {contractFor && <ContractSheet attendee={contractFor} salesApi={salesApi} onClose={closeContract} />}
+      {icpFor && <IcpSheet attendee={icpFor.attendee} icp={icpFor.icp} onClose={closeIcp} />}
     </div>
   );
 };

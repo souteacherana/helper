@@ -10,9 +10,9 @@ export type PersonType = 'PF' | 'PJ';
 
 /**
  * De onde veio o valor: HELPER (ficha do evento), Asaas, contrato antigo na D4Sign, grupo da
- * equipe no WhatsApp ou digitado no admin
+ * equipe no WhatsApp, formulário de inscrição (ICP) ou digitado no admin
  */
-export type BillingSource = 'helper' | 'asaas' | 'd4sign' | 'whatsapp' | 'manual';
+export type BillingSource = 'helper' | 'asaas' | 'd4sign' | 'whatsapp' | 'formulario' | 'manual';
 
 export type BillingField =
   | 'companyName'
@@ -82,6 +82,7 @@ export const BILLING_SOURCE_LABELS: Record<BillingSource, string> = {
   asaas: 'Asaas',
   d4sign: 'D4Sign',
   whatsapp: 'WhatsApp',
+  formulario: 'Formulário',
   manual: 'Manual'
 };
 

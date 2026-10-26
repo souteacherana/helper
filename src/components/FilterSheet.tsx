@@ -4,6 +4,8 @@ import { BADGE_COLORS } from '../types/index';
 import {
   BADGE_OPTIONS,
   EMPTY_FILTERS,
+  ICP_BAND_OPTIONS,
+  READINESS_OPTIONS,
   MENTORSHIP_PROGRAMS,
   type CloserFilters,
   type TriState
@@ -117,6 +119,49 @@ export const FilterSheet: React.FC<FilterSheetProps> = ({ open, filters, resultC
                     <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: BADGE_COLORS[o.value] }} />
                     <span className="truncate">{o.label}</span>
                     {active && <Check className="w-3.5 h-3.5 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </Section>
+
+          <Section title="ICP" hint="Nível do formulário de inscrição; marque um ou mais">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {ICP_BAND_OPTIONS.map(o => {
+                const active = filters.icp.includes(o.value);
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => set({ icp: active ? filters.icp.filter(v => v !== o.value) : [...filters.icp, o.value] })}
+                    className={`py-2.5 px-2 rounded-xl border text-left transition ${
+                      active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="block text-xs font-bold">{o.label}</span>
+                    <span className={`block text-[11px] ${active ? 'text-slate-300' : 'text-slate-500'}`}>{o.hint}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </Section>
+
+          <Section title="Prontidão" hint="A fecha no evento · B precisa de call e proposta · C precisa de segurança">
+            <div className="grid grid-cols-3 gap-2">
+              {READINESS_OPTIONS.map(r => {
+                const active = filters.readiness.includes(r);
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => set({ readiness: active ? filters.readiness.filter(v => v !== r) : [...filters.readiness, r] })}
+                    className={`py-3 rounded-xl border text-sm font-extrabold transition ${
+                      active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {r}
                   </button>
                 );
               })}

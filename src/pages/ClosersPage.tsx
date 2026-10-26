@@ -123,9 +123,9 @@ export const ClosersPage: React.FC = () => {
         item.phone
       );
 
-      return matchesSearch && matchesFilters(item, filters);
+      return matchesSearch && matchesFilters(item, filters, icpMap.get(item.id));
     });
-  }, [attendees, search, filters]);
+  }, [attendees, search, filters, icpMap]);
 
   const toggleExpand = (id: string) => {
     setExpandedId(prev => (prev === id ? null : id));
@@ -232,7 +232,7 @@ export const ClosersPage: React.FC = () => {
       <FilterSheet
         open={filtersOpen}
         filters={filters}
-        resultCount={attendees.filter(a => matchesFilters(a, filters)).length}
+        resultCount={attendees.filter(a => matchesFilters(a, filters, icpMap.get(a.id))).length}
         onChange={setFilters}
         onClose={closeFilters}
       />

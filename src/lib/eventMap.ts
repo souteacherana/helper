@@ -2,19 +2,91 @@ import type { Attendee, EventTable } from '../types/index';
 import { BADGE_COLORS, getBadgeLevel } from '../types/index';
 
 /**
- * Geometria do mapa do evento.
+ * Geometria do mapa do evento: auditório do Espaço Altus (Barueri), desenhado a partir da planta.
  *
- * O desenho tem sempre MAP_WIDTH unidades de largura, que representam a largura real do salão.
- * A partir das medidas em metros (configuradas pelo admin) calculamos a escala (unidades por
- * metro), a altura do desenho, a largura das áreas e o tamanho de mesas e cadeiras.
+ * O desenho tem MAP_WIDTH unidades de largura, que representam a largura real do auditório
+ * (parede a parede). O palco fica no alto do desenho e o fundo do salão embaixo.
  * As posições das mesas ficam salvas em unidades do desenho (x, y).
  */
 export const MAP_WIDTH = 1590;
 
-// Faixa superior do desenho reservada ao palco (fora da medida do salão)
-export const STAGE = { x: 152, y: 16, width: 1278, height: 48 };
+interface Box {
+  label?: string;
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
+/**
+ * Planta do auditório em metros. x: da parede esquerda para a direita (olhando o palco a
+ * partir do fundo); y: da parede do palco para o fundo do salão.
+ */
+export const VENUE = {
+  name: 'Espaço Altus',
+  areaM2: 424,
+  widthM: 44.3,
+  depthM: 12.1,
+  /** Frente do palco: daqui para o fundo é a área das mesas */
+  stageFrontM: 3.25,
+  /** Os dois cantos ao lado do palco são curvos, com centro no canto do prédio */
+  cornerRadiusM: 7.5,
+  stage: { x0: 7.6, x1: 36.8, y0: 1.25, y1: 3.25 },
+  pillars: [
+    { x0: 9.9, x1: 10.5, y0: 0, y1: 1.25 },
+    { x0: 17.9, x1: 18.5, y0: 0, y1: 1.25 },
+    { x0: 25.9, x1: 26.5, y0: 0, y1: 1.25 },
+    { x0: 33.8, x1: 34.5, y0: 0, y1: 1.25 },
+    { x0: 0, x1: 1.2, y0: 9.3, y1: 10.45 }
+  ] as Box[],
+  /** Recortes dentro do retângulo do salão, encostados numa parede lateral */
+  rooms: [
+    { label: 'Camarim', x0: 0, x1: 4.7, y0: 10.45, y1: 12.1 },
+    { label: 'House', x0: 42.3, x1: 44.3, y0: 7.7, y1: 12.1 }
+  ] as Box[],
+  /** Portas de saída nas curvas: ângulo (graus) do centro da porta, a partir da parede do palco */
+  exitAnglesDeg: [30, 60],
+  exitWidthM: 1,
+  /** Trecho do fundo que é divisória com o Lounge (o resto do fundo é parede) */
+  lounge: { x0: 34.5, x1: 42.3 },
+  /** O que fica atrás da parede do fundo, para a equipe se localizar */
+  behind: [
+    { label: 'Apoio', x0: 4.7, x1: 10 },
+    { label: 'Banheiros', x0: 10, x1: 17 },
+    { label: 'Escada', x0: 17.5, x1: 27 },
+    { label: 'Banheiros', x0: 27.5, x1: 34.5 },
+    { label: 'Lounge · Recepção', x0: 34.5, x1: 44.3 }
+  ]
+} as const;
+
 export const STAGE_SECTIONS = ['PALCO ESQUERDA', 'PALCO MEIO', 'PALCO DIREITA'];
-export const FLOOR_TOP = 80;
+
+export const UNITS_PER_METER = MAP_WIDTH / VENUE.widthM;
+/** Linha da frente do palco no desenho (acima dela: palco e parede do palco) */
+export const FLOOR_TOP = Math.round(14 + VENUE.stageFrontM * UNITS_PER_METER);
+/** Faixa abaixo do salão onde aparece o que fica atrás da parede do fundo */
+export const BACK_STRIP = Math.round(1.3 * UNITS_PER_METER);
+
+/** Metros da planta → unidades do desenho. */
+export const mapX = (m: number) => m * UNITS_PER_METER;
+export const mapY = (m: number) => FLOOR_TOP + (m - VENUE.stageFrontM) * UNITS_PER_METER;
+
+/** Contorno do salão em metros (cantos curvos amostrados), no sentido horário a partir do palco. */
+export function venueOutline(): { x: number; y: number }[] {
+  const { widthM: w, depthM: d, cornerRadiusM: r } = VENUE;
+  const arc = (cx: number, from: number, to: number) =>
+    Array.from({ length: 13 }, (_, i) => {
+      const a = ((from + ((to - from) * i) / 12) * Math.PI) / 180;
+      return { x: cx + Math.cos(a) * r, y: Math.sin(a) * r };
+    });
+  const pts = arc(w, 180, 90);
+  for (const room of [...VENUE.rooms].sort((a, b) => b.x0 - a.x0)) {
+    if (room.x1 >= w) pts.push({ x: w, y: room.y0 }, { x: room.x0, y: room.y0 }, { x: room.x0, y: d });
+    else pts.push({ x: room.x1, y: d }, { x: room.x1, y: room.y0 }, { x: 0, y: room.y0 });
+  }
+  pts.push(...arc(0, 90, 0));
+  return pts;
+}
 
 // Faixa amarela que separa as áreas
 export const DIVIDER_WIDTH = 14;
@@ -30,32 +102,25 @@ export interface MapArea {
   ticket: 'VIP' | 'SILVER';
 }
 
-/** Medidas reais do salão, definidas pelo admin. */
+/** Medidas ajustáveis pelo admin (o salão em si vem da planta). */
 export interface HallSettings {
-  widthM: number;
-  depthM: number;
   vipWidthM: number;
   tableDiameterM: number;
 }
 
-/**
- * Padrão = escala do croqui original (mesas de 1,6 m), para o desenho atual não mudar
- * até o admin informar as medidas reais.
- */
-export const DEFAULT_HALL: HallSettings = { widthM: 47.1, depthM: 7.4, vipWidthM: 12.7, tableDiameterM: 1.6 };
+export const DEFAULT_HALL: HallSettings = { vipWidthM: 12.7, tableDiameterM: 1.6 };
 
 export const HALL_LIMITS = {
-  widthM: { min: 5, max: 200 },
-  depthM: { min: 3, max: 200 },
-  vipWidthM: { min: 1, max: 200 },
+  vipWidthM: { min: 1, max: VENUE.widthM - 1 },
   tableDiameterM: { min: 0.6, max: 4 }
 } as const;
 
 const CHAIR_M = 0.36; // lado da cadeira
 const CHAIR_GAP_M = 0.12; // centro da cadeira fica 12 cm além da borda da mesa (encostada, como no croqui)
 const AISLE_M = 1.07; // corredor entre mesas vizinhas
-const FRONT_GAP_M = 1.27; // distância entre a frente do salão e a primeira fileira
+const FRONT_GAP_M = 1.27; // distância entre a frente do palco e a primeira fileira
 const SIDE_MARGIN_M = 0.9; // distância mínima do centro da mesa até a borda da área
+const WALL_CLEAR_M = 0.6; // passagem livre entre as cadeiras e as paredes
 
 export interface MapGeometry {
   hall: HallSettings;
@@ -65,17 +130,21 @@ export interface MapGeometry {
   tableRadius: number;
   chairSize: number;
   chairDistance: number;
+  /** Do centro da mesa até a borda de fora das cadeiras */
+  reach: number;
 }
 
 export function buildGeometry(hall: HallSettings): MapGeometry {
-  const upm = MAP_WIDTH / hall.widthM;
+  const upm = UNITS_PER_METER;
   const vipWidth = Math.min(hall.vipWidthM * upm, MAP_WIDTH - 2 * DIVIDER_WIDTH - 40);
   const silverWidth = (MAP_WIDTH - vipWidth - 2 * DIVIDER_WIDTH) / 2;
   const tableRadius = (hall.tableDiameterM / 2) * upm;
+  const chairSize = CHAIR_M * upm;
+  const chairDistance = tableRadius + CHAIR_GAP_M * upm;
   return {
     hall,
     unitsPerMeter: upm,
-    height: FLOOR_TOP + hall.depthM * upm,
+    height: mapY(VENUE.depthM),
     areas: [
       { key: 'SILVER_LEFT', label: 'Área Silver', shortLabel: 'Silver esq.', x: 0, width: silverWidth, ticket: 'SILVER' },
       { key: 'VIP', label: 'Área VIP', shortLabel: 'VIP', x: silverWidth + DIVIDER_WIDTH, width: vipWidth, ticket: 'VIP' },
@@ -89,8 +158,9 @@ export function buildGeometry(hall: HallSettings): MapGeometry {
       }
     ],
     tableRadius,
-    chairSize: CHAIR_M * upm,
-    chairDistance: tableRadius + CHAIR_GAP_M * upm
+    chairSize,
+    chairDistance,
+    reach: chairDistance + chairSize / 2
   };
 }
 
@@ -112,31 +182,67 @@ export function chairPositions(geo: MapGeometry, seats: number): { x: number; y:
   });
 }
 
+/**
+ * Faixa de x (desenho) onde cabe o centro de uma mesa na altura y, sem as cadeiras encostarem
+ * nas paredes laterais, nos cantos curvos, no camarim ou na House. Vazia (min > max) se não couber.
+ */
+export function floorSpanAt(geo: MapGeometry, y: number, clearM = WALL_CLEAR_M): { min: number; max: number } {
+  const upm = geo.unitsPerMeter;
+  const ym = VENUE.stageFrontM + (y - FLOOR_TOP) / upm;
+  const reach = geo.reach / upm + clearM;
+  let min = reach;
+  let max = VENUE.widthM - reach;
+  const corner = VENUE.cornerRadiusM + reach;
+  if (ym < corner) {
+    const dx = Math.sqrt(corner * corner - ym * ym);
+    min = Math.max(min, dx);
+    max = Math.min(max, VENUE.widthM - dx);
+  }
+  for (const room of VENUE.rooms) {
+    if (ym + reach <= room.y0 || ym - reach >= room.y1) continue;
+    if (room.x0 <= 0) min = Math.max(min, room.x1 + reach);
+    else max = Math.min(max, room.x0 - reach);
+  }
+  return { min: min * upm, max: max * upm };
+}
+
+/** Limites de y do centro de uma mesa dentro do salão. */
+function floorRows(geo: MapGeometry, clearM = WALL_CLEAR_M) {
+  return { top: FLOOR_TOP + geo.tableRadius + 4, bottom: geo.height - geo.reach - clearM * geo.unitsPerMeter };
+}
+
 /** Mantém a mesa (com as cadeiras) dentro do salão. */
 export function clampToFloor(geo: MapGeometry, x: number, y: number) {
-  const margin = geo.chairDistance + geo.chairSize / 2;
-  return {
-    x: Math.round(Math.min(MAP_WIDTH - margin, Math.max(margin, x))),
-    y: Math.round(Math.min(geo.height - margin, Math.max(FLOOR_TOP + geo.tableRadius + 4, y)))
-  };
+  const rows = floorRows(geo);
+  const cy = Math.min(rows.bottom, Math.max(rows.top, y));
+  const span = floorSpanAt(geo, cy);
+  const [min, max] = span.min <= span.max ? [span.min, span.max] : [geo.reach, MAP_WIDTH - geo.reach];
+  return { x: Math.round(Math.min(max, Math.max(min, x))), y: Math.round(cy) };
 }
 
-/** Mesas que ficaram fora do salão (ex: depois de diminuir a profundidade). */
-export function tablesOutsideHall(geo: MapGeometry, tables: { x: number; y: number }[]) {
-  return tables.filter(t => t.y + geo.tableRadius > geo.height || t.x < 0 || t.x > MAP_WIDTH);
+/** Mesas fora do salão ou com as cadeiras batendo numa parede. */
+export function tablesOutsideHall<T extends { x: number; y: number }>(geo: MapGeometry, tables: T[]): T[] {
+  const rows = floorRows(geo, 0);
+  return tables.filter(t => {
+    const span = floorSpanAt(geo, t.y, 0);
+    return t.y > rows.bottom + 1 || t.x < span.min - 1 || t.x > span.max + 1;
+  });
 }
 
-/** Altura do desenho: o salão, ou mais se alguma mesa estiver abaixo dele. */
+/** Altura do desenho: o salão e a faixa do fundo, ou mais se alguma mesa estiver abaixo dele. */
 export function mapHeightFor(geo: MapGeometry, tables: { y: number }[]): number {
   const lowest = tables.reduce((max, t) => Math.max(max, t.y), 0);
-  return Math.max(geo.height, lowest + geo.chairDistance + geo.chairSize);
+  return Math.max(geo.height + BACK_STRIP, lowest + geo.reach + 8);
 }
 
 // ---------- Organização automática das mesas de uma área ----------
 
 /**
- * Posições para `count` mesas dentro da área, em fileiras (como no croqui):
- * cada fileira centralizada; fileiras de mesmo tamanho deslocadas meia mesa.
+ * Posições para `count` mesas dentro da área, em fileiras a partir do palco.
+ * Cada fileira usa só o trecho em que as mesas cabem (cantos curvos, camarim e House
+ * encurtam as fileiras); as mesas são repartidas por igual entre as fileiras usadas
+ * e fileiras com folga ficam deslocadas meia mesa, alternando.
+ * Se não couber tudo, as fileiras continuam abaixo do salão (aparecem como fora).
  */
 export function layoutArea(geo: MapGeometry, area: MapArea, count: number): { x: number; y: number }[] {
   if (count <= 0) return [];
@@ -145,31 +251,47 @@ export function layoutArea(geo: MapGeometry, area: MapArea, count: number): { x:
   const rowGap = tableSpacing * 0.83;
   const rowTop = FLOOR_TOP + geo.tableRadius + FRONT_GAP_M * upm;
   const sideMargin = Math.max(SIDE_MARGIN_M * upm, geo.chairDistance);
-  const usable = Math.max(0, area.width - 2 * sideMargin);
+  const { bottom } = floorRows(geo);
 
-  const perRowMax = Math.max(1, Math.floor(usable / tableSpacing + 1e-6) + 1);
-  const rows = Math.ceil(count / perRowMax);
-  const base = Math.floor(count / rows);
-  const extra = count % rows;
-  const center = area.x + area.width / 2;
+  const rows: { y: number; min: number; max: number; cap: number }[] = [];
+  let capacity = 0;
+  while (capacity < count && rows.length < 60) {
+    const y = rowTop + rows.length * rowGap;
+    let min = area.x + sideMargin;
+    let max = area.x + area.width - sideMargin;
+    if (y <= bottom) {
+      const span = floorSpanAt(geo, y);
+      min = Math.max(min, span.min);
+      max = Math.min(max, span.max);
+    }
+    const cap = max >= min ? Math.floor((max - min) / tableSpacing + 1e-6) + 1 : 0;
+    rows.push({ y, min, max, cap });
+    capacity += cap;
+  }
 
-  // Fileiras do mesmo tamanho: desloca meia mesa alternando (fileiras de tamanhos
-  // diferentes já ficam intercaladas por estarem centralizadas)
-  const allSameSize = rows > 1 && extra === 0;
-  const widest = base + (extra ? 1 : 0);
-  const spacing = Math.min(tableSpacing, usable / Math.max(1, widest - 1 + (allSameSize ? 0.5 : 0)));
-
-  const positions: { x: number; y: number }[] = [];
-  for (let r = 0; r < rows; r++) {
-    const inRow = base + (r < extra ? 1 : 0);
-    const stagger = allSameSize ? (r % 2 === 0 ? -spacing / 4 : spacing / 4) : 0;
-    for (let j = 0; j < inRow; j++) {
-      positions.push({
-        x: Math.round(center + (j - (inRow - 1) / 2) * spacing + stagger),
-        y: Math.round(rowTop + r * rowGap)
-      });
+  // Reparte por igual: o menor "teto" por fileira que comporta todas; o que sobra sai das do fundo
+  let level = 0;
+  while (rows.reduce((sum, r) => sum + Math.min(r.cap, level), 0) < count) level++;
+  const inRow = rows.map(r => Math.min(r.cap, level));
+  let excess = inRow.reduce((a, b) => a + b, 0) - count;
+  for (let i = inRow.length - 1; i >= 0 && excess > 0; i--) {
+    if (inRow[i] === level) {
+      inRow[i]--;
+      excess--;
     }
   }
+
+  const positions: { x: number; y: number }[] = [];
+  rows.forEach((row, r) => {
+    const n = inRow[r];
+    if (!n) return;
+    const slack = row.max - row.min - (n - 1) * tableSpacing;
+    const stagger = Math.max(-slack / 2, Math.min(slack / 2, (r % 2 === 0 ? -1 : 1) * (tableSpacing / 4)));
+    const center = (row.min + row.max) / 2 + stagger;
+    for (let j = 0; j < n; j++) {
+      positions.push({ x: Math.round(center + (j - (n - 1) / 2) * tableSpacing), y: Math.round(row.y) });
+    }
+  });
   return positions;
 }
 

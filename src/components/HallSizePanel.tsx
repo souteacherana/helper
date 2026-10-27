@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, LayoutGrid, Ruler, Save } from 'lucide-react';
-import { HALL_LIMITS, type HallSettings } from '../lib/eventMap';
+import { HALL_LIMITS, VENUE, type HallSettings } from '../lib/eventMap';
 
 interface HallSizePanelProps {
   hall: HallSettings;
@@ -11,8 +11,6 @@ interface HallSizePanelProps {
 }
 
 const FIELDS: { key: keyof HallSettings; label: string; hint: string }[] = [
-  { key: 'widthM', label: 'Largura do salão', hint: 'De uma parede lateral à outra' },
-  { key: 'depthM', label: 'Profundidade', hint: 'Da frente do palco até o fundo' },
   { key: 'vipWidthM', label: 'Largura da área VIP', hint: 'Faixa central; as áreas Silver dividem o resto' },
   { key: 'tableDiameterM', label: 'Diâmetro da mesa', hint: 'Mesa redonda, sem as cadeiras' }
 ];
@@ -20,11 +18,9 @@ const FIELDS: { key: keyof HallSettings; label: string; hint: string }[] = [
 const toText = (n: number) => String(n).replace('.', ',');
 const toNumber = (s: string) => Number(s.replace(',', '.'));
 
-/** Medidas reais do salão em metros (admin). O mapa inteiro é desenhado nessa escala. */
+/** Medidas ajustáveis do mapa (admin): o salão segue a planta; aqui entram área VIP e mesas. */
 export const HallSizePanel: React.FC<HallSizePanelProps> = ({ hall, tablesCount, outsideCount, onSave, onRearrange }) => {
   const [draft, setDraft] = useState<Record<keyof HallSettings, string>>(() => ({
-    widthM: toText(hall.widthM),
-    depthM: toText(hall.depthM),
     vipWidthM: toText(hall.vipWidthM),
     tableDiameterM: toText(hall.tableDiameterM)
   }));
@@ -33,8 +29,6 @@ export const HallSizePanel: React.FC<HallSizePanelProps> = ({ hall, tablesCount,
   // Medidas salvas em outro aparelho
   useEffect(() => {
     setDraft({
-      widthM: toText(hall.widthM),
-      depthM: toText(hall.depthM),
       vipWidthM: toText(hall.vipWidthM),
       tableDiameterM: toText(hall.tableDiameterM)
     });
@@ -47,7 +41,6 @@ export const HallSizePanel: React.FC<HallSizePanelProps> = ({ hall, tablesCount,
     const { min, max } = HALL_LIMITS[f.key];
     if (!Number.isFinite(v) || v < min || v > max) errors.push(`${f.label}: entre ${toText(min)} e ${toText(max)} m`);
   }
-  if (parsed.vipWidthM >= parsed.widthM - 1) errors.push('A área VIP precisa ser menor que a largura do salão');
   const changed = FIELDS.some(f => parsed[f.key] !== hall[f.key]);
 
   const save = () => {
@@ -61,15 +54,15 @@ export const HallSizePanel: React.FC<HallSizePanelProps> = ({ hall, tablesCount,
       <div className="p-4 sm:p-5 border-b border-slate-200">
         <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
           <Ruler className="w-4 h-4 text-slate-500" />
-          <span>Tamanho do salão</span>
+          <span>Medidas</span>
         </h2>
         <p className="text-[11px] text-slate-500 mt-0.5">
-          Medidas reais em metros. O mapa é desenhado nessa escala: mesas, cadeiras e espaços ficam proporcionais.
+          O salão segue a planta do {VENUE.name} ({toText(VENUE.widthM)} m de largura, {toText(Math.round((VENUE.depthM - VENUE.stageFrontM) * 100) / 100)} m do palco ao fundo). Mesas, cadeiras e corredores ficam na escala real.
         </p>
       </div>
 
       <div className="p-4 sm:p-5 space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
           {FIELDS.map(f => (
             <label key={f.key} className="space-y-1.5">
               <span className="block font-bold text-slate-700">{f.label}</span>
@@ -127,13 +120,13 @@ export const HallSizePanel: React.FC<HallSizePanelProps> = ({ hall, tablesCount,
 
         {justSaved && tablesCount > 0 && (
           <p className="text-[11px] text-slate-600">
-            Medidas salvas. As mesas continuam onde estavam: use “Reorganizar mesas nesta escala” para redistribuí-las pelo novo tamanho.
+            Medidas salvas. As mesas continuam onde estavam: use “Reorganizar mesas nesta escala” para redistribuí-las.
           </p>
         )}
         {outsideCount > 0 && (
           <p className="text-[11px] font-semibold text-amber-700 flex items-center gap-1">
             <AlertTriangle className="w-3.5 h-3.5" />
-            {outsideCount} mesa(s) fora do salão (abaixo da linha vermelha). Arraste para dentro ou reorganize.
+            {outsideCount} mesa(s) fora do salão ou encostadas numa parede (em vermelho). Arraste para dentro ou reorganize.
           </p>
         )}
       </div>

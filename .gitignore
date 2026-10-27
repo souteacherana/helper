@@ -34,3 +34,6 @@ participantes_*.xlsx
 
 # Conversas exportadas do WhatsApp (dados pessoais de clientes, não versionar)
 whatsapp/
+
+# Contexto interno para novos chats (não versionar)
+CONTEXTO_HELPER.md

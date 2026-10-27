@@ -6,15 +6,11 @@ import { DEFAULT_HALL, type HallSettings } from '../lib/eventMap';
 const STORAGE_KEY_HALL = 'helper_rise_hall_v1';
 
 interface HallRow {
-  hall_width_m: number;
-  hall_depth_m: number;
   vip_width_m: number;
   table_diameter_m: number;
 }
 
 const fromRow = (r: HallRow): HallSettings => ({
-  widthM: Number(r.hall_width_m),
-  depthM: Number(r.hall_depth_m),
   vipWidthM: Number(r.vip_width_m),
   tableDiameterM: Number(r.table_diameter_m)
 });
@@ -29,7 +25,7 @@ function readCached(): HallSettings {
   return DEFAULT_HALL;
 }
 
-/** Medidas do salão (tabela event_settings): carrega, acompanha em tempo real e salva (admin). */
+/** Área VIP e tamanho das mesas (tabela event_settings; o salão vem da planta): carrega, acompanha em tempo real e salva (admin). */
 export function useHallSettings() {
   const { userSession, authReady, reportError } = useApp();
   const isTeam = userSession.role === 'CLOSER' || userSession.role === 'ADMIN';
@@ -39,7 +35,7 @@ export function useHallSettings() {
     if (!supabase) return;
     const { data, error } = await supabase
       .from('event_settings')
-      .select('hall_width_m, hall_depth_m, vip_width_m, table_diameter_m')
+      .select('vip_width_m, table_diameter_m')
       .eq('id', 1)
       .maybeSingle();
     if (error) {
@@ -76,8 +72,6 @@ export function useHallSettings() {
     const { error } = await supabase
       .from('event_settings')
       .update({
-        hall_width_m: next.widthM,
-        hall_depth_m: next.depthM,
         vip_width_m: next.vipWidthM,
         table_diameter_m: next.tableDiameterM,
         updated_at: new Date().toISOString()

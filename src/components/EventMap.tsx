@@ -1,18 +1,41 @@
 import React, { useMemo, useRef, useState } from 'react';
 import type { Attendee, EventTable } from '../types/index';
 import {
+  BACK_STRIP,
   DIVIDER_WIDTH,
   FLOOR_TOP,
   MAP_WIDTH,
-  STAGE,
   STAGE_SECTIONS,
+  VENUE,
   chairColor,
   chairPositions,
   clampToFloor,
   mapHeightFor,
+  mapX,
+  mapY,
   seatKey,
+  tablesOutsideHall,
+  venueOutline,
   type MapGeometry
 } from '../lib/eventMap';
+
+const OUTLINE_PATH = 'M' + venueOutline().map(p => `${mapX(p.x).toFixed(1)} ${mapY(p.y).toFixed(1)}`).join(' L') + ' Z';
+
+/** Portas de saída nas curvas: o trecho da parede e a posição do rótulo, já no desenho. */
+const EXITS = VENUE.exitAnglesDeg.flatMap(deg =>
+  [0, VENUE.widthM].map(cx => {
+    const half = VENUE.exitWidthM / 2 / VENUE.cornerRadiusM;
+    const at = (rad: number, r: number) => {
+      const dx = Math.cos(rad) * r;
+      return { x: mapX(cx === 0 ? dx : cx - dx), y: mapY(Math.sin(rad) * r) };
+    };
+    const rad = (deg * Math.PI) / 180;
+    const p1 = at(rad - half, VENUE.cornerRadiusM);
+    const p2 = at(rad + half, VENUE.cornerRadiusM);
+    const label = at(rad, VENUE.cornerRadiusM + 0.6);
+    return { key: `${cx}-${deg}`, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, labelX: label.x, labelY: label.y };
+  })
+);
 
 /** Régua de escala com um comprimento "redondo" (1, 2, 5, 10... m) de uns 150–300 de desenho. */
 function scaleBar(unitsPerMeter: number) {
@@ -111,13 +134,21 @@ export const EventMap: React.FC<EventMapProps> = ({
     setDrag(null);
   };
 
-  const sectionWidth = STAGE.width / STAGE_SECTIONS.length;
+  const stageX = mapX(VENUE.stage.x0);
+  const stageY = mapY(VENUE.stage.y0);
+  const stageW = mapX(VENUE.stage.x1 - VENUE.stage.x0);
+  const stageH = mapY(VENUE.stage.y1) - stageY;
+  const sectionWidth = stageW / STAGE_SECTIONS.length;
+  const outlinePath = OUTLINE_PATH;
+  const exits = EXITS;
+  // Mesas fora do salão ou com cadeiras batendo numa parede (considera a posição do arraste)
+  const placed = drag ? tables.map(t => (t.id === drag.id ? { ...t, x: drag.x, y: drag.y } : t)) : tables;
+  const outsideIds = new Set(tablesOutsideHall(geo, placed).map(t => t.id));
   // Durante o arraste, considera a posição nova para o desenho crescer junto
   const height = mapHeightFor(geo, drag ? [...tables, { y: drag.y }] : tables);
   const scale = scaleBar(geo.unitsPerMeter);
   const tableRadius = geo.tableRadius;
   const chairSize = geo.chairSize;
-  const fmt = (m: number) => m.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 
   return (
     <svg
@@ -135,14 +166,76 @@ export const EventMap: React.FC<EventMapProps> = ({
     >
       <rect x={0} y={0} width={MAP_WIDTH} height={height} fill="#FFFFFF" />
 
+      {/* O que fica atrás da parede do fundo */}
+      <rect x={0} y={geo.height} width={MAP_WIDTH} height={BACK_STRIP} fill="#F8FAFC" />
+      {VENUE.behind.map(b => (
+        <text key={b.label + b.x0} x={mapX((b.x0 + b.x1) / 2)} y={geo.height + BACK_STRIP / 2 + 5} textAnchor="middle" fontSize={13} fill="#94A3B8">
+          {b.label}
+        </text>
+      ))}
+
+      {/* Áreas, recortadas pelo contorno do salão */}
+      <defs>
+        <clipPath id="venue-floor">
+          <path d={outlinePath} />
+        </clipPath>
+      </defs>
+      <g clipPath="url(#venue-floor)">
+        {geo.areas.map((area, i) => (
+          <g key={area.key}>
+            <rect
+              x={area.x}
+              y={FLOOR_TOP}
+              width={area.width}
+              height={geo.height - FLOOR_TOP}
+              fill={area.ticket === 'VIP' ? '#FDE4E6' : '#F1F1F1'}
+            />
+            {i < geo.areas.length - 1 && (
+              <rect x={area.x + area.width} y={FLOOR_TOP} width={DIVIDER_WIDTH} height={geo.height - FLOOR_TOP} fill="#FEF3C7" />
+            )}
+          </g>
+        ))}
+      </g>
+      {geo.areas.map(area => {
+        const anchor = area.key === 'SILVER_RIGHT' ? 'end' : area.ticket === 'VIP' ? 'middle' : 'start';
+        // Rótulos no fundo, desviando do camarim (esquerda) e da House (direita)
+        const x =
+          area.key === 'SILVER_RIGHT'
+            ? Math.min(area.x + area.width, mapX(VENUE.rooms[1].x0)) - 10
+            : area.ticket === 'VIP'
+              ? area.x + area.width / 2
+              : Math.max(area.x, mapX(VENUE.rooms[0].x1)) + 10;
+        return (
+          <text key={area.key} x={x} y={geo.height - 10} textAnchor={anchor} fontSize={14} fill="#334155">
+            {area.label.toUpperCase()}
+          </text>
+        );
+      })}
+
+      {/* Camarim e House */}
+      {VENUE.rooms.map(room => (
+        <g key={room.label}>
+          <rect x={mapX(room.x0)} y={mapY(room.y0)} width={mapX(room.x1 - room.x0)} height={mapY(room.y1) - mapY(room.y0)} fill="#E2E8F0" />
+          <text
+            x={mapX((room.x0 + room.x1) / 2)}
+            y={(mapY(room.y0) + mapY(room.y1)) / 2 + 5}
+            textAnchor="middle"
+            fontSize={13}
+            fontWeight={700}
+            fill="#64748B"
+          >
+            {room.label}
+          </text>
+        </g>
+      ))}
+
       {/* Palco */}
-      <rect x={STAGE.x} y={STAGE.y - 4} width={STAGE.width} height={4} fill="#0F172A" />
-      <rect x={STAGE.x} y={STAGE.y} width={STAGE.width} height={STAGE.height} fill="#8C8C8C" />
+      <rect x={stageX} y={stageY} width={stageW} height={stageH} fill="#8C8C8C" />
       {STAGE_SECTIONS.map((label, i) => (
         <text
           key={label}
-          x={STAGE.x + sectionWidth * i + sectionWidth / 2}
-          y={STAGE.y + STAGE.height / 2 + 9}
+          x={stageX + sectionWidth * i + sectionWidth / 2}
+          y={stageY + stageH / 2 + 9}
           textAnchor="middle"
           fontSize={26}
           fontWeight={800}
@@ -152,40 +245,39 @@ export const EventMap: React.FC<EventMapProps> = ({
         </text>
       ))}
 
-      {/* Áreas */}
-      {geo.areas.map((area, i) => (
-        <g key={area.key}>
-          <rect
-            x={area.x}
-            y={FLOOR_TOP}
-            width={area.width}
-            height={height - FLOOR_TOP}
-            fill={area.ticket === 'VIP' ? '#FDE4E6' : '#F1F1F1'}
-          />
-          <text
-            x={area.key === 'SILVER_RIGHT' ? area.x + area.width - 10 : area.ticket === 'VIP' ? area.x + area.width / 2 : area.x + 10}
-            y={height - 10}
-            textAnchor={area.key === 'SILVER_RIGHT' ? 'end' : area.ticket === 'VIP' ? 'middle' : 'start'}
-            fontSize={14}
-            fill="#334155"
-          >
-            {area.label.toUpperCase()}
+      {/* Paredes, pilares, divisória do lounge e saídas */}
+      <path d={outlinePath} fill="none" stroke="#334155" strokeWidth={5} strokeLinejoin="round" />
+      {VENUE.pillars.map(p => (
+        <rect key={`${p.x0}-${p.y0}`} x={mapX(p.x0)} y={mapY(p.y0)} width={mapX(p.x1 - p.x0)} height={mapY(p.y1) - mapY(p.y0)} fill="#475569" />
+      ))}
+      <line x1={mapX(VENUE.lounge.x0)} x2={mapX(VENUE.lounge.x1)} y1={geo.height} y2={geo.height} stroke="#FFFFFF" strokeWidth={7} />
+      <line
+        x1={mapX(VENUE.lounge.x0)}
+        x2={mapX(VENUE.lounge.x1)}
+        y1={geo.height}
+        y2={geo.height}
+        stroke="#334155"
+        strokeWidth={3}
+        strokeDasharray="10 7"
+      />
+      {exits.map(e => (
+        <g key={e.key}>
+          <line x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2} stroke="#16A34A" strokeWidth={8} strokeLinecap="round" />
+          <text x={e.labelX} y={e.labelY + 4} textAnchor="middle" fontSize={11} fontWeight={800} fill="#15803D">
+            SAÍDA
           </text>
-          {i < geo.areas.length - 1 && (
-            <rect x={area.x + area.width} y={FLOOR_TOP} width={DIVIDER_WIDTH} height={height - FLOOR_TOP} fill="#FEF3C7" />
-          )}
         </g>
       ))}
 
-      {/* Limite do salão (pode haver mesas fora dele depois de diminuir as medidas) */}
-      {height > geo.height + 1 && (
+      {/* Mesas abaixo do salão */}
+      {height > geo.height + BACK_STRIP + 1 && (
         <line x1={0} x2={MAP_WIDTH} y1={geo.height} y2={geo.height} stroke="#DC2626" strokeWidth={2} strokeDasharray="10 6" />
       )}
 
-      {/* Medidas do salão e régua de escala */}
-      <g transform={`translate(12 ${FLOOR_TOP + 22})`}>
+      {/* Nome do espaço e régua de escala */}
+      <g transform={`translate(12 ${mapY(0.25) + 12})`}>
         <text fontSize={13} fontWeight={700} fill="#475569">
-          {`Salão ${fmt(geo.hall.widthM)} m × ${fmt(geo.hall.depthM)} m`}
+          {`${VENUE.name} · ${VENUE.areaM2} m²`}
         </text>
         <line x1={0} x2={scale.length} y1={14} y2={14} stroke="#475569" strokeWidth={2} />
         <line x1={0} x2={0} y1={9} y2={19} stroke="#475569" strokeWidth={2} />
@@ -228,7 +320,7 @@ export const EventMap: React.FC<EventMapProps> = ({
                 strokeDasharray={isSelected && !hasHighlight ? '6 4' : undefined}
               />
             )}
-            <circle r={tableRadius} fill="#555555" />
+            <circle r={tableRadius} fill={outsideIds.has(table.id) ? '#DC2626' : '#555555'} />
             <text y={tableRadius * 0.22} textAnchor="middle" fontSize={Math.max(9, tableRadius * 0.63)} fontWeight={800} fill="#FFFFFF">
               {table.label}
             </text>

@@ -271,7 +271,7 @@ export function layoutArea(geo: MapGeometry, area: MapArea, count: number): { x:
 
   // Reparte por igual: o menor "teto" por fileira que comporta todas; o que sobra sai das do fundo
   let level = 0;
-  while (rows.reduce((sum, r) => sum + Math.min(r.cap, level), 0) < count) level++;
+  while (level < count && rows.reduce((sum, r) => sum + Math.min(r.cap, level), 0) < count) level++;
   const inRow = rows.map(r => Math.min(r.cap, level));
   let excess = inRow.reduce((a, b) => a + b, 0) - count;
   for (let i = inRow.length - 1; i >= 0 && excess > 0; i--) {

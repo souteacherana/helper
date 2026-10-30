@@ -29,6 +29,23 @@ const OFFER_MAX_INSTALLMENTS: Record<string, Record<PayMethod, number>> = {
 export const maxInstallments = (offerId: string, method: PayMethod) =>
   (OFFER_MAX_INSTALLMENTS[offerId] ?? MAX_INSTALLMENTS)[method];
 
+/**
+ * Juros do cartão parcelado, mesma conta do checkout (calculateTotalValue): Tabela Price a
+ * 2,49% ao mês. Pix e boleto não têm juros; o RISERS (mastermind) é sem juros pelo contrato.
+ */
+export const CARD_MONTHLY_RATE = 0.0249;
+const INTEREST_FREE_OFFERS = new Set(['mastermind']);
+export const hasCardInterest = (offerId: string, part: Pick<PartDraft, 'method' | 'installments'>) =>
+  part.method === 'CREDIT_CARD' && part.installments > 1 && !INTEREST_FREE_OFFERS.has(offerId);
+/** Quanto a parte cobra de fato: o valor dela, ou o total com juros no cartão parcelado */
+export function withInterestCents(offerId: string, part: Pick<PartDraft, 'method' | 'amountCents' | 'installments'>): number {
+  if (!hasCardInterest(offerId, part)) return part.amountCents;
+  const i = CARD_MONTHLY_RATE;
+  const n = part.installments;
+  const pmt = part.amountCents * ((i * Math.pow(1 + i, n)) / (Math.pow(1 + i, n) - 1));
+  return Math.round(pmt * n);
+}
+
 /** Pix à vista (pagamento único no Pix) tem 5% de desconto sobre o total */
 export const PIX_CASH_DISCOUNT = 0.05;
 export const isPixCash = (parts: Pick<PartDraft, 'method' | 'installments'>[]) =>

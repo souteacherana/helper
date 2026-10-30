@@ -29,12 +29,13 @@ import { ProposalSheet } from '../components/ProposalSheet';
 import { ContractSheet } from '../components/ContractSheet';
 import { IcpSheet } from '../components/IcpSheet';
 import { useIcp } from '../hooks/useIcp';
-import { READINESS_STYLE, levelStyle, type Icp } from '../lib/icp';
+import { levelStyle, type Icp } from '../lib/icp';
 import { useSales } from '../hooks/useSales';
 import { isClosedSale, isOpenSale, type Sale } from '../lib/sales';
 import {
   EMPTY_FILTERS,
   FILTER_PRESETS,
+  RISERS_OFFER_ID,
   activeFilterChips,
   loadFilters,
   matchesFilters,
@@ -75,6 +76,8 @@ export const ClosersPage: React.FC = () => {
     }
     return map;
   }, [salesApi.sales]);
+  const risers = salesApi.access.get(RISERS_OFFER_ID);
+  const isRiser = (id: string) => risers?.has(id) ?? false;
 
   const [search, setSearch] = useState('');
   // Filtros ficam lembrados neste aparelho
@@ -123,9 +126,9 @@ export const ClosersPage: React.FC = () => {
         item.phone
       );
 
-      return matchesSearch && matchesFilters(item, filters, icpMap.get(item.id));
+      return matchesSearch && matchesFilters(item, filters, icpMap.get(item.id), risers?.has(item.id));
     });
-  }, [attendees, search, filters, icpMap]);
+  }, [attendees, search, filters, icpMap, risers]);
 
   const toggleExpand = (id: string) => {
     setExpandedId(prev => (prev === id ? null : id));
@@ -232,7 +235,7 @@ export const ClosersPage: React.FC = () => {
       <FilterSheet
         open={filtersOpen}
         filters={filters}
-        resultCount={attendees.filter(a => matchesFilters(a, filters, icpMap.get(a.id))).length}
+        resultCount={attendees.filter(a => matchesFilters(a, filters, icpMap.get(a.id), isRiser(a.id))).length}
         onChange={setFilters}
         onClose={closeFilters}
       />
@@ -342,20 +345,18 @@ export const ClosersPage: React.FC = () => {
 
                   {/* Context Badges */}
                   <div className="flex flex-wrap items-center gap-1.5 text-xs pt-0.5">
+                    {isRiser(item.id) && (
+                      <span className="text-[11px] font-extrabold px-2 py-0.5 rounded bg-violet-600 text-white">💎 RISER</span>
+                    )}
                     {itemIcp && (
                       <button
                         type="button"
                         onClick={() => setIcpFor({ attendee: item, icp: itemIcp })}
-                        className={`text-[11px] font-bold pl-2 pr-1 py-0.5 rounded border flex items-center gap-1.5 hover:brightness-95 ${levelStyle(itemIcp.level)}`}
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded border hover:brightness-95 ${levelStyle(itemIcp.level)}`}
                         title="Ver a classificação completa"
                       >
-                        <span>
-                          ICP {itemIcp.level ?? '—'}
-                          {itemIcp.profile ? ` · ${itemIcp.profile}` : ''}
-                        </span>
-                        {itemIcp.readiness && (
-                          <span className={`px-1.5 rounded border text-[10px] font-extrabold ${READINESS_STYLE[itemIcp.readiness]}`}>{itemIcp.readiness}</span>
-                        )}
+                        ICP {itemIcp.level ?? '—'}
+                        {itemIcp.profile ? ` · ${itemIcp.profile}` : ''}
                       </button>
                     )}
 

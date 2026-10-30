@@ -30,6 +30,7 @@ import {
   chargedCents,
   expectedCents,
   formatBRL,
+  hasCardInterest,
   installmentText,
   isPixCash,
   maxInstallments,
@@ -38,6 +39,7 @@ import {
   isOpenSale,
   parseBRL,
   validateParts,
+  withInterestCents,
   type Offer,
   type PartDraft,
   type PayMethod,
@@ -191,7 +193,7 @@ const SaleCard: React.FC<{ sale: Sale; attendee: Attendee; salesApi: SalesApi; h
           <p className="text-sm font-extrabold text-slate-900">{sale.offerName}</p>
           <p className="text-xs text-slate-500">
             {formatBRL(chargedCents(sale))}
-            {chargedCents(sale) < sale.totalCents ? ' (Pix à vista −5%)' : ''} · {sale.closerName} · {new Date(sale.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+            {chargedCents(sale) < sale.totalCents ? ' (Pix à vista −5%)' : chargedCents(sale) > sale.totalCents ? ' (com juros do cartão)' : ''} · {sale.closerName} · {new Date(sale.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
           </p>
         </div>
         <span className={`shrink-0 text-[11px] font-bold px-2 py-1 rounded-md border flex items-center gap-1 ${SALE_STATUS_STYLE[sale.status]}`}>
@@ -260,6 +262,8 @@ const Composer: React.FC<{
   // Com mais de uma parte não há desconto de Pix à vista: a parte nova completa o total cheio
   const remainingForNewPart = total - used;
   const errors = validateParts(total, drafts.map(d => ({ ...d, amountCents: Number.isFinite(d.amountCents) ? d.amountCents : 0 })), today, offer.id);
+  // Com juros do cartão o cliente paga mais que o total do produto
+  const customerPays = drafts.reduce((acc, p) => acc + (Number.isFinite(p.amountCents) ? withInterestCents(offer.id, p) : 0), 0);
 
   const update = (i: number, patch: Partial<PartForm>) =>
     setParts(prev =>
@@ -362,7 +366,11 @@ const Composer: React.FC<{
                     >
                       {Array.from({ length: max }, (_, n) => n + 1).map(n => (
                         <option key={n} value={n}>
-                          {n}x{Number.isFinite(draft.amountCents) && draft.amountCents > 0 ? ` de ${formatBRL(Math.round(draft.amountCents / n))}` : ''}
+                          {n}x
+                          {Number.isFinite(draft.amountCents) && draft.amountCents > 0
+                            ? ` de ${formatBRL(Math.round(withInterestCents(offer.id, { ...draft, installments: n }) / n))}`
+                            : ''}
+                          {hasCardInterest(offer.id, { method: part.method, installments: n }) ? ' (com juros)' : ''}
                         </option>
                       ))}
                     </select>
@@ -381,6 +389,11 @@ const Composer: React.FC<{
                 </label>
               </div>
               {part.method === 'BOLETO' && <p className="text-[11px] text-slate-500">Boleto pago depois do vencimento tem multa de R$ 40.</p>}
+              {hasCardInterest(offer.id, part) && Number.isFinite(draft.amountCents) && draft.amountCents > 0 && (
+                <p className="text-[11px] font-semibold text-amber-800">
+                  Cartão em {part.installments}x tem juros: o cliente paga {formatBRL(withInterestCents(offer.id, draft))} nesta parte.
+                </p>
+              )}
               {pixCash && <p className="text-[11px] font-semibold text-emerald-700">Pix à vista: total com 5% de desconto ({formatBRL(pixCashCents(total))}).</p>}
             </div>
           );
@@ -406,6 +419,9 @@ const Composer: React.FC<{
         <span>{remaining === 0 ? 'Total fechado' : remaining > 0 ? 'Falta distribuir' : 'Passou do total'}</span>
         <span>{formatBRL(Math.abs(remaining))}</span>
       </div>
+      {remaining === 0 && customerPays > total && (
+        <p className="text-xs font-bold text-slate-700 text-right">Cliente paga no total (com juros do cartão): {formatBRL(customerPays)}</p>
+      )}
 
       {tried && errors.length > 0 && (
         <ul className="text-xs font-semibold text-rose-700 space-y-0.5">

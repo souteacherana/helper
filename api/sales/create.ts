@@ -19,6 +19,7 @@ import {
   todaySaoPaulo,
   toCents,
   validateParts,
+  withInterestCents,
   type PartDraft,
   type PayMethod,
   type SaleStatus
@@ -178,13 +179,15 @@ export async function handleCreateSale(authorization: string | null, input: unkn
     return fail(500, 'Não foi possível registrar a venda. Tente novamente.');
   }
   const saleId: string = sale.id;
+  // O que cada parte cobra de fato (cartão parcelado com juros); é isso que vai para o Asaas e fica gravado
+  const charged = parts.map(p => withInterestCents(offerId, p));
 
   await db.from('sale_parts').insert(
     parts.map((p, position) => ({
       sale_id: saleId,
       position,
       method: p.method,
-      amount: fromCents(p.amountCents),
+      amount: fromCents(charged[position]),
       installments: p.installments,
       due_date: p.dueDate
     }))
@@ -201,7 +204,7 @@ export async function handleCreateSale(authorization: string | null, input: unkn
         description: `${offer.name} • Imersão Rise 2026${label}`,
         externalReference: buildReference(saleId, position),
         // Parcelado: o Asaas divide o total e acerta os centavos na última parcela
-        ...(p.installments > 1 ? { installmentCount: p.installments, totalValue: fromCents(p.amountCents) } : { value: fromCents(p.amountCents) }),
+        ...(p.installments > 1 ? { installmentCount: p.installments, totalValue: fromCents(charged[position]) } : { value: fromCents(charged[position]) }),
         ...(p.method === 'BOLETO' ? { fine: { value: BOLETO_FINE, type: 'FIXED' } } : {})
       });
       created.push(payment.installment ? { kind: 'installments', id: payment.installment } : { kind: 'payments', id: payment.id });

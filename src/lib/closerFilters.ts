@@ -1,6 +1,6 @@
 import type { Attendee, BadgeLevel } from '../types/index';
 import { getBadgeLevel } from '../types/index';
-import type { Icp, Readiness } from './icp';
+import type { Icp } from './icp';
 
 export type TriState = 'ALL' | 'YES' | 'NO';
 export const MENTORSHIP_PROGRAMS = ['Mentoria Partiu 10K', 'Professores de Elite'] as const;
@@ -15,7 +15,8 @@ export const ICP_BAND_OPTIONS: { value: IcpBand; label: string; hint: string }[]
   { value: 'WORKSHOP', label: 'ICP 7', hint: 'Workshop' },
   { value: 'NONE', label: 'Sem ICP', hint: 'Não respondeu' }
 ];
-export const READINESS_OPTIONS: Readiness[] = ['A', 'B', 'C'];
+/** Oferta do RISERS (o antigo Mastermind): quem tem acesso a ela é convidado do RISERS */
+export const RISERS_OFFER_ID = 'mastermind';
 
 export function icpBand(icp: Icp | undefined): IcpBand {
   const level = icp?.level;
@@ -36,7 +37,7 @@ export interface CloserFilters {
   renewal: boolean;
   accompanied: boolean;
   icp: IcpBand[];
-  readiness: Readiness[];
+  riser: TriState; // convidado do RISERS?
 }
 
 export const EMPTY_FILTERS: CloserFilters = {
@@ -48,7 +49,7 @@ export const EMPTY_FILTERS: CloserFilters = {
   renewal: false,
   accompanied: false,
   icp: [],
-  readiness: []
+  riser: 'ALL'
 };
 
 export const BADGE_OPTIONS: { value: BadgeLevel; label: string }[] = [
@@ -59,15 +60,16 @@ export const BADGE_OPTIONS: { value: BadgeLevel; label: string }[] = [
 
 /** Atalhos de venda prontos. */
 export const FILTER_PRESETS: { id: string; label: string; filters: CloserFilters }[] = [
-  { id: 'prontidao-a', label: '⭐ Prontidão A', filters: { ...EMPTY_FILTERS, readiness: ['A'] } },
+  { id: 'risers', label: '💎 RISERS', filters: { ...EMPTY_FILTERS, riser: 'YES' } },
   { id: 'vip-nao-mentorado', label: '🔥 VIPs não mentorados', filters: { ...EMPTY_FILTERS, badges: ['VIP'], mentee: 'NO' } },
   { id: 'presentes-nao-abordados', label: 'Presentes ainda não abordados', filters: { ...EMPTY_FILTERS, presence: 'YES', approached: 'NO' } },
   { id: 'renovacao', label: 'Renovação próxima', filters: { ...EMPTY_FILTERS, renewal: true } }
 ];
 
-export function matchesFilters(a: Attendee, f: CloserFilters, icp?: Icp): boolean {
+export function matchesFilters(a: Attendee, f: CloserFilters, icp?: Icp, isRiser = false): boolean {
   if (f.icp.length && !f.icp.includes(icpBand(icp))) return false;
-  if (f.readiness.length && !(icp?.readiness && f.readiness.includes(icp.readiness))) return false;
+  if (f.riser === 'YES' && !isRiser) return false;
+  if (f.riser === 'NO' && isRiser) return false;
   if (f.badges.length && !f.badges.includes(getBadgeLevel(a))) return false;
   if (f.mentee === 'YES' && !a.isMentee) return false;
   if (f.mentee === 'NO' && a.isMentee) return false;
@@ -102,9 +104,7 @@ export function activeFilterChips(f: CloserFilters): { key: string; label: strin
     const label = ICP_BAND_OPTIONS.find(o => o.value === band)?.label ?? band;
     chips.push({ key: `icp-${band}`, label, remove: x => ({ ...x, icp: x.icp.filter(v => v !== band) }) });
   }
-  for (const r of f.readiness) {
-    chips.push({ key: `readiness-${r}`, label: `Prontidão ${r}`, remove: x => ({ ...x, readiness: x.readiness.filter(v => v !== r) }) });
-  }
+  if (f.riser !== 'ALL') chips.push({ key: 'riser', label: f.riser === 'YES' ? 'RISERS' : 'Não RISERS', remove: x => ({ ...x, riser: 'ALL' }) });
   return chips;
 }
 
@@ -115,7 +115,11 @@ const STORAGE_KEY = 'helper_rise_closer_filters_v1';
 export function loadFilters(): CloserFilters {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return { ...EMPTY_FILTERS, ...(JSON.parse(stored) as Partial<CloserFilters>) };
+    if (stored) {
+      // "readiness" (Prontidão) saiu dos filtros; descarta o que ficou guardado
+      const { readiness: _old, ...saved } = JSON.parse(stored) as Partial<CloserFilters> & { readiness?: unknown };
+      return { ...EMPTY_FILTERS, ...saved };
+    }
   } catch {
     // armazenamento indisponível ou inválido
   }

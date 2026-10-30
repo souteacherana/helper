@@ -5,7 +5,6 @@ import {
   BADGE_OPTIONS,
   EMPTY_FILTERS,
   ICP_BAND_OPTIONS,
-  READINESS_OPTIONS,
   MENTORSHIP_PROGRAMS,
   type CloserFilters,
   type TriState
@@ -147,25 +146,8 @@ export const FilterSheet: React.FC<FilterSheetProps> = ({ open, filters, resultC
             </div>
           </Section>
 
-          <Section title="Prontidão" hint="A fecha no evento · B precisa de call e proposta · C precisa de segurança">
-            <div className="grid grid-cols-3 gap-2">
-              {READINESS_OPTIONS.map(r => {
-                const active = filters.readiness.includes(r);
-                return (
-                  <button
-                    key={r}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => set({ readiness: active ? filters.readiness.filter(v => v !== r) : [...filters.readiness, r] })}
-                    className={`py-3 rounded-xl border text-sm font-extrabold transition ${
-                      active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    {r}
-                  </button>
-                );
-              })}
-            </div>
+          <Section title="RISERS" hint="Convidados para o RISERS">
+            <Segmented value={filters.riser} options={tri('Todos', 'É RISER', 'Não é RISER')} onChange={riser => set({ riser })} />
           </Section>
 
           <Section title="Mentoria">

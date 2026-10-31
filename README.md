@@ -2,6 +2,7 @@
 
 Sistema de apoio ao evento **Imersão Rise 2026** (Espaço Altus, Barueri/SP — 31/10 e 01/11).
 
+- **Dashboard** (`/dashboard`, closers e admin): a lista de participantes do **Rise 360** (a mesma da aba Imersão Rise → Participantes: ingresso, perfil, convite do Mastermind, presença, ICP, estilo, WhatsApp, Instagram e respostas do formulário, com os mesmos filtros) e, em cada pessoa, os botões **Cobrança** (proposta/cobrança no Asaas) e **Contrato** (D4Sign, depois que a entrada é paga). A pessoa é ligada ao cadastro do HELPER pelo WhatsApp (e pelo nome).
 - **Closers**: ficha de vendas de cada participante (mentoria, pagamento, oferta, acompanhante), anotações de abordagem e mapa do salão.
 - **Recepção** (sem login): busca pelo nome, crachá a entregar e check-in do dia.
 - **Admin**: cadastro/edição, importação por planilha, equipe de closers, mapa (mesas e lugares), QR Codes dos crachás e zerar presenças.
@@ -22,6 +23,7 @@ React + TypeScript + Vite + Tailwind, banco e autenticação no **Supabase**, ho
 | `ADMIN_PIN` | servidor | PIN do admin |
 | `SUPABASE_SERVICE_ROLE_KEY` | servidor | chave secreta do Supabase (nunca com prefixo `VITE_`) |
 | `BLOB_READ_WRITE_TOKEN` | scripts | só para subir fotos no Vercel Blob; o site não usa |
+| `RISE_LINK_TOKEN` | servidor | link de integração do Rise 360 (Rise → Imersão Rise → Participantes → 🔗 Link sem senha → copiar). Pode colar o link inteiro ou só o código depois de `?k=`. Sem ele o Dashboard avisa que a integração não está configurada |
 
 Tudo que começa com `VITE_` vai para o código do site (é público). PINs e chaves secretas ficam **sem** esse prefixo.
 

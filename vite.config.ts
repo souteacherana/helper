@@ -27,6 +27,7 @@ const AUTH_ROUTES: Record<string, [string, string]> = {
   '/api/sales/sync': ['/api/sales/sync.ts', 'handleSyncSale'],
   '/api/contracts/create': ['/api/contracts/create.ts', 'handleCreateContract'],
   '/api/contracts/sync': ['/api/contracts/sync.ts', 'handleSyncContract'],
+  '/api/rise/participants': ['/api/rise/participants.ts', 'handleRiseParticipants'],
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {

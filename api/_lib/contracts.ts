@@ -3,10 +3,12 @@
  * cofre do evento na D4Sign, cadastra o cliente como signatário e envia. A Ana e as testemunhas
  * já vêm pré-assinadas no modelo (imagens), então só o cliente assina.
  * Dispara sozinho quando a entrada é paga; o botão da tela serve para tentar de novo.
+ * Rodízio de chaves: começa pela chave do último contrato enviado e, se ela bater o limite da
+ * D4Sign, cancela o documento pela metade e envia tudo de novo pela próxima.
  */
 import JSZip from 'jszip';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { D4_STATUS, D4SignError, d4signClient } from './d4sign.js';
+import { D4_STATUS, D4SignError, d4signClient, d4signKeys, isKeyLimitError, keyRotation, onDocument } from './d4sign.js';
 import { BLANK, contractFields, contractPhrases } from './contractFields.js';
 import { toCents, type PartDraft, type PayMethod } from '../../src/lib/sales.js';
 
@@ -30,6 +32,17 @@ export async function fillTemplate(template: ArrayBuffer | Uint8Array, fields: R
 
 const siteUrl = (env: Env) => (env.PUBLIC_SITE_URL || env.VITE_PUBLIC_SITE_URL || 'https://helper-tau-six.vercel.app').replace(/\/+$/, '');
 
+/** Chave do último contrato enviado: o rodízio continua dela. */
+async function lastKey(db: SupabaseClient): Promise<string | undefined> {
+  const { data } = await db
+    .from('sales')
+    .select('*')
+    .in('contract_status', ['SENT', 'SIGNED'])
+    .order('contract_sent_at', { ascending: false, nullsFirst: false })
+    .limit(1);
+  return data?.[0]?.contract_key ?? undefined;
+}
+
 async function fail(db: SupabaseClient, saleId: string, message: string) {
   await db.from('sales').update({ contract_status: 'FAILED', contract_error: message, updated_at: new Date().toISOString() }).eq('id', saleId);
   return { error: message };
@@ -43,7 +56,8 @@ export async function generateContract(db: SupabaseClient, env: Env, saleId: str
     .eq('id', saleId)
     .in('status', ['ENTRY_PAID', 'PAID'])
     .in('contract_status', ['NONE', 'FAILED'])
-    .select('id, attendee_id, offer_id, offer_name, total_value, contract_uuid');
+    // '*': contract_key só existe depois da seção 11 atualizada do SQL
+    .select('*');
   const sale = claimed?.[0];
   if (!sale) {
     const { data: current } = await db.from('sales').select('status, contract_status').eq('id', saleId).maybeSingle();
@@ -54,10 +68,10 @@ export async function generateContract(db: SupabaseClient, env: Env, saleId: str
   }
 
   try {
-    const d4 = d4signClient(env);
+    const keys = d4signKeys(env);
     // Tentativa anterior que falhou no meio: cancela o documento incompleto antes de criar outro
     if (sale.contract_uuid) {
-      await d4.cancel(sale.contract_uuid, 'Substituído por nova geração do contrato').catch(() => undefined);
+      await onDocument(keys, sale.contract_key, d4 => d4.cancel(sale.contract_uuid, 'Substituído por nova geração do contrato')).catch(() => undefined);
     }
 
     const [{ data: offer }, { data: parts }, { data: attendee }, { data: profile }] = await Promise.all([
@@ -89,18 +103,34 @@ export async function generateContract(db: SupabaseClient, env: Env, saleId: str
     );
     const file = await fillTemplate(template, fields, contractPhrases(toCents(sale.total_value), drafts));
 
-    const uuid = await d4.uploadDocx(`${sale.offer_name} - ${name}`, file);
-    await db.from('sales').update({ contract_uuid: uuid }).eq('id', saleId);
-    await d4.waitProcessed(uuid);
-    await d4.addSigner(uuid, profile.email.trim());
-    await d4.addWebhook(uuid, `${siteUrl(env)}/api/d4sign/webhook`);
-    await d4.send(uuid, `Olá, ${name.split(' ')[0]}! Segue o contrato da ${sale.offer_name}, fechado na Imersão Rise 2026, para a sua assinatura.`);
+    let limitError: D4SignError | undefined;
+    for (const key of keyRotation(keys, await lastKey(db))) {
+      const d4 = d4signClient(key);
+      let uuid = '';
+      try {
+        uuid = await d4.uploadDocx(`${sale.offer_name} - ${name}`, file);
+        await db.from('sales').update({ contract_uuid: uuid }).eq('id', saleId);
+        // Separado: se a coluna ainda não existir no banco, o uuid fica salvo do mesmo jeito
+        await db.from('sales').update({ contract_key: key.id }).eq('id', saleId);
+        await d4.waitProcessed(uuid);
+        await d4.addSigner(uuid, profile.email.trim());
+        await d4.addWebhook(uuid, `${siteUrl(env)}/api/d4sign/webhook`);
+        await d4.send(uuid, `Olá, ${name.split(' ')[0]}! Segue o contrato da ${sale.offer_name}, fechado na Imersão Rise 2026, para a sua assinatura.`);
+      } catch (err) {
+        if (!isKeyLimitError(err)) throw err;
+        console.warn(`contract ${saleId}: chave D4Sign ${key.id} no limite (${err.message}), tentando a próxima`);
+        limitError = err;
+        if (uuid) await d4.cancel(uuid, 'Limite da chave da API: contrato enviado de novo por outra chave').catch(() => undefined);
+        continue;
+      }
 
-    await db
-      .from('sales')
-      .update({ contract_status: 'SENT', contract_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq('id', saleId);
-    return { ok: true };
+      await db
+        .from('sales')
+        .update({ contract_status: 'SENT', contract_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', saleId);
+      return { ok: true };
+    }
+    return fail(db, saleId, `D4Sign: ${keys.length > 1 ? `as ${keys.length} chaves atingiram o limite` : 'a chave atingiu o limite'} (${limitError?.message}).`);
   } catch (err) {
     console.error(`contract ${saleId} failed:`, err);
     return fail(db, saleId, err instanceof D4SignError ? `D4Sign: ${err.message}` : 'Erro inesperado ao gerar o contrato.');
@@ -109,9 +139,9 @@ export async function generateContract(db: SupabaseClient, env: Env, saleId: str
 
 /** Confere na D4Sign se o contrato foi assinado ou cancelado. */
 export async function syncContract(db: SupabaseClient, env: Env, saleId: string): Promise<void> {
-  const { data: sale } = await db.from('sales').select('contract_uuid, contract_status').eq('id', saleId).maybeSingle();
+  const { data: sale } = await db.from('sales').select('*').eq('id', saleId).maybeSingle();
   if (!sale?.contract_uuid || sale.contract_status === 'SIGNED') return;
-  const status = await d4signClient(env).status(sale.contract_uuid);
+  const status = await onDocument(d4signKeys(env), sale.contract_key, d4 => d4.status(sale.contract_uuid));
   const now = new Date().toISOString();
   if (status === D4_STATUS.FINISHED) {
     await db.from('sales').update({ contract_status: 'SIGNED', contract_signed_at: now, updated_at: now }).eq('id', saleId);

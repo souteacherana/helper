@@ -649,6 +649,8 @@ ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS contract_uuid TEXT;
 ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS contract_error TEXT;
 ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS contract_sent_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS contract_signed_at TIMESTAMP WITH TIME ZONE;
+-- Chave da D4Sign (rodízio D4SIGN_TOKEN_API, _2, _3...) que criou o documento: só ela o enxerga
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS contract_key TEXT;
 
 CREATE INDEX IF NOT EXISTS sales_contract_uuid_idx ON public.sales (contract_uuid);
 

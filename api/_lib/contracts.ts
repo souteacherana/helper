@@ -7,19 +7,23 @@
 import JSZip from 'jszip';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { D4_STATUS, D4SignError, d4signClient } from './d4sign.js';
-import { BLANK, contractFields } from './contractFields.js';
+import { BLANK, contractFields, contractPhrases } from './contractFields.js';
 import { toCents, type PartDraft, type PayMethod } from '../../src/lib/sales.js';
 
 type Env = Record<string, string | undefined>;
 
 const escapeXml = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
-/** Troca os campos [[...]] do modelo; campo sem valor vira lacuna, como no contrato em branco */
-export async function fillTemplate(template: ArrayBuffer | Uint8Array, fields: Record<string, string>): Promise<Uint8Array> {
+/**
+ * Troca os campos [[...]] do modelo; campo sem valor vira lacuna, como no contrato em branco.
+ * phrases: trechos fixos do modelo trocados pelo texto exato (contractPhrases).
+ */
+export async function fillTemplate(template: ArrayBuffer | Uint8Array, fields: Record<string, string>, phrases: Record<string, string> = {}): Promise<Uint8Array> {
   const zip = await JSZip.loadAsync(template);
   const doc = zip.file('word/document.xml');
   if (!doc) throw new Error('Modelo de contrato inválido (sem word/document.xml).');
-  const xml = (await doc.async('string')).replace(/\[\[([A-Z0-9_]+)\]\]/g, (_, key: string) => escapeXml(fields[key] ?? BLANK));
+  let xml = (await doc.async('string')).replace(/\[\[([A-Z0-9_]+)\]\]/g, (_, key: string) => escapeXml(fields[key] ?? BLANK));
+  for (const [from, to] of Object.entries(phrases)) xml = xml.split(escapeXml(from)).join(escapeXml(to));
   zip.file('word/document.xml', xml);
   return zip.generateAsync({ type: 'uint8array' });
 }
@@ -83,7 +87,7 @@ export async function generateContract(db: SupabaseClient, env: Env, saleId: str
       { name, rg: profile.rg || '', cpf: profile.cpf || '', email: profile.email, phone: profile.phone || attendee?.phone || '' },
       new Date()
     );
-    const file = await fillTemplate(template, fields);
+    const file = await fillTemplate(template, fields, contractPhrases(toCents(sale.total_value), drafts));
 
     const uuid = await d4.uploadDocx(`${sale.offer_name} - ${name}`, file);
     await db.from('sales').update({ contract_uuid: uuid }).eq('id', saleId);

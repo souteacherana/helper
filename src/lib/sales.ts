@@ -3,6 +3,7 @@
  * O valor total de cada produto é fixo; o closer só escolhe como dividir: a primeira parte é
  * a entrada e as outras completam o total (ex: Pix + cartão A + cartão B). Cada parte vira
  * uma cobrança no Asaas. Valores em centavos para a soma fechar sempre exata.
+ * Na Proposta Custom o closer define também o nome, o total e os juros (CUSTOM_PRICING).
  */
 export type PayMethod = 'PIX' | 'BOLETO' | 'CREDIT_CARD';
 export type SaleStatus = 'CREATING' | 'PENDING' | 'ENTRY_PAID' | 'PAID' | 'CANCELLED' | 'FAILED';
@@ -20,11 +21,19 @@ export const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
 
 export const PAY_METHODS: PayMethod[] = ['PIX', 'CREDIT_CARD', 'BOLETO'];
 export const METHOD_LABELS: Record<PayMethod, string> = { PIX: 'Pix', BOLETO: 'Boleto', CREDIT_CARD: 'Cartão' };
+
+/**
+ * Proposta Custom: o closer escolhe o produto (que define o contrato) e define o nome, o total,
+ * as parcelas e os juros por parcela. As regras abaixo usam este id no lugar do produto.
+ */
+export const CUSTOM_PRICING = 'custom';
+
 /** Cartão até 12x, boleto até 6x, Pix à vista */
 export const MAX_INSTALLMENTS: Record<PayMethod, number> = { PIX: 1, BOLETO: 6, CREDIT_CARD: 12 };
-/** Só o Mastermind: até 14x sem juros em qualquer forma (contrato do Mastermind) */
+/** Mastermind (até 14x sem juros em qualquer forma, pelo contrato) e Proposta Custom */
 const OFFER_MAX_INSTALLMENTS: Record<string, Record<PayMethod, number>> = {
-  mastermind: { PIX: 14, BOLETO: 14, CREDIT_CARD: 14 }
+  mastermind: { PIX: 14, BOLETO: 14, CREDIT_CARD: 14 },
+  [CUSTOM_PRICING]: { PIX: 14, BOLETO: 14, CREDIT_CARD: 14 }
 };
 export const maxInstallments = (offerId: string, method: PayMethod) =>
   (OFFER_MAX_INSTALLMENTS[offerId] ?? MAX_INSTALLMENTS)[method];
@@ -32,13 +41,25 @@ export const maxInstallments = (offerId: string, method: PayMethod) =>
 /**
  * Juros do cartão parcelado, mesma conta do checkout (calculateTotalValue): Tabela Price a
  * 2,49% ao mês. Pix e boleto não têm juros; o RISERS (mastermind) é sem juros pelo contrato.
+ * O Elite e a Proposta Custom usam juros fixos por parcela (FLAT_INTEREST) no lugar da Tabela Price.
  */
 export const CARD_MONTHLY_RATE = 0.0249;
 const INTEREST_FREE_OFFERS = new Set(['mastermind']);
+/** Juros fixos por parcela: no Elite o closer escolhe com (R$ 49,90) ou sem; na Custom, qualquer valor */
+const FLAT_INTEREST: Record<string, number | 'ANY'> = { elite: 4990, [CUSTOM_PRICING]: 'ANY' };
+export const flatInterestOption = (offerId: string): number | 'ANY' | undefined => FLAT_INTEREST[offerId];
+/** Maior juro por parcela aceito na Proposta Custom */
+export const MAX_FLAT_INTEREST_CENTS = 100000;
+/** Esta parte pode ter juros fixos por parcela? (Elite: só cartão parcelado; Custom: qualquer parcelado) */
+export const allowsFlatInterest = (offerId: string, part: Pick<PartDraft, 'method' | 'installments'>) => {
+  const option = FLAT_INTEREST[offerId];
+  return option !== undefined && part.installments > 1 && (option === 'ANY' || part.method === 'CREDIT_CARD');
+};
 export const hasCardInterest = (offerId: string, part: Pick<PartDraft, 'method' | 'installments'>) =>
-  part.method === 'CREDIT_CARD' && part.installments > 1 && !INTEREST_FREE_OFFERS.has(offerId);
-/** Quanto a parte cobra de fato: o valor dela, ou o total com juros no cartão parcelado */
-export function withInterestCents(offerId: string, part: Pick<PartDraft, 'method' | 'amountCents' | 'installments'>): number {
+  part.method === 'CREDIT_CARD' && part.installments > 1 && !INTEREST_FREE_OFFERS.has(offerId) && !(offerId in FLAT_INTEREST);
+/** Quanto a parte cobra de fato: o valor dela, ou o total com juros no parcelado */
+export function withInterestCents(offerId: string, part: Pick<PartDraft, 'method' | 'amountCents' | 'installments' | 'interestCents'>): number {
+  if (allowsFlatInterest(offerId, part)) return part.amountCents + (part.interestCents ?? 0) * part.installments;
   if (!hasCardInterest(offerId, part)) return part.amountCents;
   const i = CARD_MONTHLY_RATE;
   const n = part.installments;
@@ -46,15 +67,22 @@ export function withInterestCents(offerId: string, part: Pick<PartDraft, 'method
   return Math.round(pmt * n);
 }
 
-/** Pix à vista (pagamento único no Pix) tem 5% de desconto sobre o total */
-export const PIX_CASH_DISCOUNT = 0.05;
+/**
+ * Pix à vista (pagamento único no Pix) tem desconto sobre o total: 5%, e 10% no Elite
+ * (R$ 13.500 sobre R$ 15.000). Na Proposta Custom não há desconto: o closer já define o total.
+ */
+const PIX_CASH_DISCOUNT = 0.05;
+const OFFER_PIX_CASH_DISCOUNT: Record<string, number> = { elite: 0.1, [CUSTOM_PRICING]: 0 };
+export const pixCashDiscount = (offerId = '') => OFFER_PIX_CASH_DISCOUNT[offerId] ?? PIX_CASH_DISCOUNT;
 export const isPixCash = (parts: Pick<PartDraft, 'method' | 'installments'>[]) =>
   parts.length === 1 && parts[0].method === 'PIX' && parts[0].installments === 1;
-export const pixCashCents = (totalCents: number) => Math.round(totalCents * (1 - PIX_CASH_DISCOUNT));
+export const pixCashCents = (totalCents: number, offerId = '') => Math.round(totalCents * (1 - pixCashDiscount(offerId)));
 /** Quanto as partes precisam somar: o total, ou o total com desconto no Pix à vista */
-export const expectedCents = (totalCents: number, parts: Pick<PartDraft, 'method' | 'installments'>[]) =>
-  isPixCash(parts) ? pixCashCents(totalCents) : totalCents;
+export const expectedCents = (totalCents: number, parts: Pick<PartDraft, 'method' | 'installments'>[], offerId = '') =>
+  isPixCash(parts) ? pixCashCents(totalCents, offerId) : totalCents;
 export const MAX_PARTS = 4;
+/** Maior total aceito na Proposta Custom */
+export const MAX_CUSTOM_TOTAL_CENTS = 20000000;
 /** Multa fixa (R$) do boleto pago depois do vencimento */
 export const BOLETO_FINE = 40;
 /** Menor valor de parcela que o Asaas aceita */
@@ -90,6 +118,8 @@ export interface PartDraft {
   installments: number;
   /** AAAA-MM-DD: vencimento da cobrança (no parcelado, da 1ª parcela) */
   dueDate: string;
+  /** Juros fixos por parcela escolhidos pelo closer (Elite e Proposta Custom; 0 = sem juros) */
+  interestCents?: number;
 }
 
 export interface Offer {
@@ -170,7 +200,7 @@ export function addDays(isoDate: string, days: number): string {
 
 // ---------- Validação ----------
 
-/** Lista de problemas da divisão (vazia = pode gerar as cobranças). */
+/** Lista de problemas da divisão (vazia = pode gerar as cobranças). offerId: o produto, ou CUSTOM_PRICING. */
 export function validateParts(totalCents: number, parts: PartDraft[], today: string, offerId = ''): string[] {
   const errors: string[] = [];
   if (parts.length === 0) return ['Adicione pelo menos uma forma de pagamento.'];
@@ -192,9 +222,20 @@ export function validateParts(totalCents: number, parts: PartDraft[], today: str
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(part.dueDate) || part.dueDate < today) errors.push(`${label}: vencimento a partir de hoje.`);
     else if (part.dueDate > lastDue) errors.push(`${label}: vencimento em até ${MAX_DUE_DAYS} dias.`);
+
+    const interest = part.interestCents ?? 0;
+    const option = flatInterestOption(offerId);
+    if (!Number.isInteger(interest) || interest < 0) errors.push(`${label}: juros inválidos.`);
+    else if (interest > 0 && !allowsFlatInterest(offerId, part)) {
+      errors.push(option === undefined ? `${label}: esta proposta não tem juros por parcela.` : `${label}: juros por parcela só no ${option === 'ANY' ? 'parcelado' : 'cartão parcelado'}.`);
+    } else if (interest > 0 && option !== 'ANY' && interest !== option) {
+      errors.push(`${label}: os juros são de ${formatBRL(option ?? 0)} por parcela.`);
+    } else if (interest > MAX_FLAT_INTEREST_CENTS) {
+      errors.push(`${label}: juros de no máximo ${formatBRL(MAX_FLAT_INTEREST_CENTS)} por parcela.`);
+    }
   });
 
-  const target = expectedCents(totalCents, parts);
+  const target = expectedCents(totalCents, parts, offerId);
   const sum = parts.reduce((acc, p) => acc + (Number.isInteger(p.amountCents) ? p.amountCents : 0), 0);
   if (sum !== target) {
     errors.push(sum < target ? `Faltam ${formatBRL(target - sum)} para fechar o total.` : `Passou ${formatBRL(sum - target)} do total.`);

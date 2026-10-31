@@ -3,7 +3,7 @@ import { Save, Search, Users } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { SalesApi } from '../hooks/useSales';
 import { formatCurrencyInput, matchesQuery } from '../lib/format';
-import { formatBRL, parseBRL, type Offer } from '../lib/sales';
+import { formatBRL, parseBRL, pixCashCents, pixCashDiscount, type Offer } from '../lib/sales';
 
 const OfferEditor: React.FC<{ offer: Offer; salesApi: SalesApi }> = ({ offer, salesApi }) => {
   const { attendees } = useApp();
@@ -77,6 +77,11 @@ const OfferEditor: React.FC<{ offer: Offer; salesApi: SalesApi }> = ({ offer, sa
             onChange={e => setForm({ ...form, total: formatCurrencyInput(e.target.value) })}
             className={`${input} ${invalidTotal ? 'border-rose-400' : ''}`}
           />
+          {totalCents !== null && !invalidTotal && (
+            <span className="font-semibold text-emerald-700">
+              Pix à vista ({Math.round(pixCashDiscount(offer.id) * 100)}% de desconto): {formatBRL(pixCashCents(totalCents, offer.id))}
+            </span>
+          )}
         </label>
         <label className="sm:col-span-2 flex flex-col gap-1 text-[11px] font-bold text-slate-600">
           Condição do evento (o closer vê ao montar a proposta)

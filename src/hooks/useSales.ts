@@ -3,11 +3,13 @@ import { useApp } from '../context/AppContext';
 import { supabase } from '../lib/supabase';
 import {
   addDays,
+  CUSTOM_PRICING,
   MAX_DUE_DAYS,
   offerFromRow,
   partFromRow,
   saleFromRow,
   todaySaoPaulo,
+  withInterestCents,
   type Offer,
   type OfferRow,
   type PartDraft,
@@ -30,12 +32,14 @@ export interface CreateSaleInput {
   offerId: string;
   closerName: string;
   parts: PartDraft[];
+  /** Proposta Custom: nome e total definidos pelo closer (o produto em offerId define o contrato) */
+  custom?: { name: string; totalCents: number };
 }
 
 // Modo demonstração (sem Supabase): produtos de exemplo e vendas só na memória
 const DEMO_OFFERS: Offer[] = [
   { id: 'partiu10k', name: 'Partiu 10K', totalCents: 479640, condition: 'Exemplo: condição especial da Imersão', restricted: false, active: true, sortOrder: 1, contractTemplateUrl: '' },
-  { id: 'elite', name: 'Professores de Elite', totalCents: 1200000, condition: 'Exemplo: 12 meses de mentoria', restricted: false, active: true, sortOrder: 2, contractTemplateUrl: '' },
+  { id: 'elite', name: 'Professores de Elite', totalCents: 1500000, condition: 'Exemplo: R$ 13.500 à vista ou R$ 15.000 em até 12x', restricted: false, active: true, sortOrder: 2, contractTemplateUrl: '' },
   { id: 'mastermind', name: 'Mastermind', totalCents: null, condition: '', restricted: true, active: true, sortOrder: 3, contractTemplateUrl: '' }
 ];
 
@@ -155,13 +159,14 @@ export function useSales() {
   const createSale = async (input: CreateSaleInput): Promise<{ saleId?: string; error?: string }> => {
     if (!supabase) {
       const offer = offers.find(o => o.id === input.offerId)!;
+      const pricing = input.custom ? CUSTOM_PRICING : offer.id;
       const saleId = `venda-demo${Date.now().toString(36)}`;
       const demo: Sale = {
         id: saleId,
         attendeeId: input.attendeeId,
         offerId: offer.id,
-        offerName: offer.name,
-        totalCents: offer.totalCents ?? 0,
+        offerName: input.custom?.name ?? offer.name,
+        totalCents: input.custom?.totalCents ?? offer.totalCents ?? 0,
         closerName: input.closerName,
         status: 'PENDING',
         error: '',
@@ -173,6 +178,7 @@ export function useSales() {
         contractSignedAt: null,
         parts: input.parts.map((p, position) => ({
           ...p,
+          amountCents: withInterestCents(pricing, p),
           position,
           status: 'PENDING',
           paidInstallments: 0,
@@ -268,9 +274,10 @@ export function useSales() {
     }
   };
 
+  /** Produtos que o closer pode oferecer para esta pessoa (ativos e liberados); na Custom o valor não importa. */
+  const productsFor = (attendeeId: string) => offers.filter(o => o.active && (!o.restricted || access.get(o.id)?.has(attendeeId)));
   /** Propostas que o closer pode oferecer para esta pessoa (ativas, com valor e liberadas). */
-  const offersFor = (attendeeId: string) =>
-    offers.filter(o => o.active && o.totalCents !== null && (!o.restricted || access.get(o.id)?.has(attendeeId)));
+  const offersFor = (attendeeId: string) => productsFor(attendeeId).filter(o => o.totalCents !== null);
 
   return {
     offers,
@@ -279,6 +286,7 @@ export function useSales() {
     billing,
     tablesMissing,
     offersFor,
+    productsFor,
     createSale,
     cancelSale,
     syncSale,

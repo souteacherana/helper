@@ -12,6 +12,7 @@ import {
   Plus,
   QrCode,
   RefreshCw,
+  SlidersHorizontal,
   Trash2,
   X,
   XCircle
@@ -22,19 +23,23 @@ import { BadgePill } from './BadgePill';
 import type { SalesApi } from '../hooks/useSales';
 import { buildWhatsAppUrl, formatCurrencyInput, formatDateBR } from '../lib/format';
 import {
+  CUSTOM_PRICING,
+  MAX_CUSTOM_TOTAL_CENTS,
   MAX_PARTS,
   METHOD_LABELS,
   PART_STATUS_LABELS,
   PAY_METHODS,
   SALE_STATUS_LABELS,
+  allowsFlatInterest,
   chargedCents,
   expectedCents,
+  flatInterestOption,
   formatBRL,
-  hasCardInterest,
   installmentText,
   isPixCash,
   maxInstallments,
   pixCashCents,
+  pixCashDiscount,
   isClosedSale,
   isOpenSale,
   parseBRL,
@@ -60,6 +65,8 @@ interface PartForm {
   amount: string;
   installments: number;
   dueDate: string;
+  /** Juros por parcela (R$): no Elite, com ou sem; na Proposta Custom, o valor que o closer quiser */
+  interest: string;
 }
 
 const partLabel = (index: number, count: number) => (count === 1 ? 'Pagamento' : index === 0 ? 'Entrada' : `Parte ${index + 1}`);
@@ -73,12 +80,18 @@ const SALE_STATUS_STYLE: Record<SaleStatus, string> = {
   FAILED: 'bg-rose-50 text-rose-700 border-rose-200'
 };
 
-const toDraft = (p: PartForm): PartDraft => ({
+/** Os juros só entram onde a proposta aceita (Elite: cartão parcelado; Custom: qualquer parcelado) */
+const toDraft = (p: PartForm, pricing: string): PartDraft => ({
   method: p.method,
   amountCents: parseBRL(p.amount),
   installments: p.installments,
-  dueDate: p.dueDate
+  dueDate: p.dueDate,
+  interestCents: allowsFlatInterest(pricing, p) && p.interest.trim() ? parseBRL(p.interest) : 0
 });
+
+/** Cartão e boleto já abrem no máximo de parcelas; na Custom (até 14x), em 12x */
+const defaultInstallments = (pricing: string, method: PayMethod) =>
+  method === 'PIX' ? 1 : pricing === CUSTOM_PRICING ? Math.min(12, maxInstallments(pricing, method)) : maxInstallments(pricing, method);
 
 /** QR do link de pagamento, para o cliente escanear com o celular dele. */
 const QrImage: React.FC<{ text: string }> = ({ text }) => {
@@ -193,7 +206,7 @@ const SaleCard: React.FC<{ sale: Sale; attendee: Attendee; salesApi: SalesApi; h
           <p className="text-sm font-extrabold text-slate-900">{sale.offerName}</p>
           <p className="text-xs text-slate-500">
             {formatBRL(chargedCents(sale))}
-            {chargedCents(sale) < sale.totalCents ? ' (Pix à vista −5%)' : chargedCents(sale) > sale.totalCents ? ' (com juros do cartão)' : ''} · {sale.closerName} · {new Date(sale.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+            {chargedCents(sale) < sale.totalCents ? ' (à vista com desconto)' : chargedCents(sale) > sale.totalCents ? ' (com juros)' : ''} · {sale.closerName} · {new Date(sale.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
           </p>
         </div>
         <span className={`shrink-0 text-[11px] font-bold px-2 py-1 rounded-md border flex items-center gap-1 ${SALE_STATUS_STYLE[sale.status]}`}>
@@ -239,42 +252,78 @@ const SaleCard: React.FC<{ sale: Sale; attendee: Attendee; salesApi: SalesApi; h
   );
 };
 
+const inputClass = 'w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-slate-900';
+
 const Composer: React.FC<{
   offer: Offer;
+  /** Proposta Custom: o closer escolhe o produto entre products e define nome, total e juros */
+  custom: boolean;
+  products: Offer[];
+  /** Produtos que já têm proposta aberta para esta pessoa */
+  openOfferIds: Set<string>;
   attendee: Attendee;
   salesApi: SalesApi;
   closerName: string;
   blocked: boolean;
   onBack: () => void;
   onCreated: (saleId: string) => void;
-}> = ({ offer, attendee, salesApi, closerName, blocked, onBack, onCreated }) => {
-  const total = offer.totalCents ?? 0;
+}> = ({ offer, custom, products, openOfferIds, attendee, salesApi, closerName, blocked, onBack, onCreated }) => {
+  const [productId, setProductId] = useState(offer.id);
+  const product = products.find(o => o.id === productId) ?? offer;
+  const [name, setName] = useState(offer.name);
+  const [nameTouched, setNameTouched] = useState(false);
+  const [totalText, setTotalText] = useState('');
+  const pricing = custom ? CUSTOM_PRICING : offer.id;
+  const parsedTotal = parseBRL(totalText);
+  const total = custom ? (Number.isFinite(parsedTotal) ? parsedTotal : 0) : offer.totalCents ?? 0;
+  const option = flatInterestOption(pricing);
+  const defaultInterest = typeof option === 'number' ? formatBRL(option) : '';
+  const discountPct = Math.round(pixCashDiscount(pricing) * 100);
+
   const today = salesApi.defaultDueDate();
-  const [parts, setParts] = useState<PartForm[]>([{ method: 'PIX', amount: '', installments: 1, dueDate: today }]);
+  const [parts, setParts] = useState<PartForm[]>([{ method: 'PIX', amount: '', installments: 1, dueDate: today, interest: defaultInterest }]);
   const [tried, setTried] = useState(false);
   const [sending, setSending] = useState(false);
   const [serverError, setServerError] = useState('');
 
-  const drafts = parts.map(toDraft);
+  const drafts = parts.map(p => toDraft(p, pricing));
   const used = drafts.reduce((acc, p) => acc + (Number.isFinite(p.amountCents) ? p.amountCents : 0), 0);
   const pixCash = isPixCash(drafts);
-  const remaining = expectedCents(total, drafts) - used;
+  const remaining = expectedCents(total, drafts, pricing) - used;
   // Com mais de uma parte não há desconto de Pix à vista: a parte nova completa o total cheio
   const remainingForNewPart = total - used;
-  const errors = validateParts(total, drafts.map(d => ({ ...d, amountCents: Number.isFinite(d.amountCents) ? d.amountCents : 0 })), today, offer.id);
-  // Com juros do cartão o cliente paga mais que o total do produto
-  const customerPays = drafts.reduce((acc, p) => acc + (Number.isFinite(p.amountCents) ? withInterestCents(offer.id, p) : 0), 0);
+  const customErrors = !custom
+    ? []
+    : [
+        ...(name.trim().length < 3 ? ['Informe o nome da proposta (aparece na cobrança do cliente).'] : []),
+        ...(total <= 0 ? ['Informe o valor total.'] : total > MAX_CUSTOM_TOTAL_CENTS ? [`Total de no máximo ${formatBRL(MAX_CUSTOM_TOTAL_CENTS)}.`] : []),
+        ...(openOfferIds.has(product.id) ? [`${product.name} já tem proposta aberta para esta pessoa. Cancele a anterior ou escolha outro produto.`] : [])
+      ];
+  const errors = [
+    ...customErrors,
+    ...validateParts(total, drafts.map(d => ({ ...d, amountCents: Number.isFinite(d.amountCents) ? d.amountCents : 0 })), today, pricing)
+  ];
+  /** Quanto a parte cobra em n parcelas (com os juros, se houver) */
+  const charge = (p: PartForm, n: number) => {
+    const d = toDraft({ ...p, installments: n }, pricing);
+    return Number.isFinite(d.amountCents) && Number.isFinite(d.interestCents) ? withInterestCents(pricing, d) : NaN;
+  };
+  // Com juros o cliente paga mais que o total do produto
+  const customerPays = parts.reduce((acc, p) => {
+    const value = charge(p, p.installments);
+    return acc + (Number.isFinite(value) ? value : 0);
+  }, 0);
 
   const update = (i: number, patch: Partial<PartForm>) =>
     setParts(prev =>
       prev.map((p, idx) => {
         if (idx !== i) return p;
         const next = { ...p, ...patch };
-        next.installments = Math.min(Math.max(1, next.installments), maxInstallments(offer.id, next.method));
-        // Pagamento único: ao trocar para/de Pix à vista, o valor acompanha o desconto de 5%
-        if (prev.length === 1 && patch.method && patch.method !== p.method) {
+        next.installments = Math.min(Math.max(1, next.installments), maxInstallments(pricing, next.method));
+        // Pagamento único: ao trocar para/de Pix à vista, o valor acompanha o desconto
+        if (prev.length === 1 && total > 0 && patch.method && patch.method !== p.method) {
           const amount = parseBRL(p.amount);
-          const pixValue = pixCashCents(total);
+          const pixValue = pixCashCents(total, pricing);
           if (patch.method === 'PIX' && next.installments === 1 && (!p.amount || amount === total)) next.amount = formatBRL(pixValue);
           else if (p.method === 'PIX' && amount === pixValue) next.amount = formatBRL(total);
         }
@@ -282,10 +331,33 @@ const Composer: React.FC<{
       })
     );
 
+  const changeTotal = (text: string) => {
+    const nextTotal = parseBRL(text);
+    // Pagamento único ainda sem valor (ou com o total anterior): acompanha o total novo
+    setParts(prev =>
+      prev.length === 1 && (!prev[0].amount || parseBRL(prev[0].amount) === total)
+        ? [{ ...prev[0], amount: Number.isFinite(nextTotal) ? formatBRL(nextTotal) : '' }]
+        : prev
+    );
+    setTotalText(text);
+  };
+
+  const changeProduct = (id: string) => {
+    setProductId(id);
+    const next = products.find(o => o.id === id);
+    if (next && !nameTouched) setName(next.name);
+  };
+
   const addPart = () =>
     setParts(prev => [
       ...prev,
-      { method: 'CREDIT_CARD', amount: remainingForNewPart > 0 ? formatBRL(remainingForNewPart) : '', installments: maxInstallments(offer.id, 'CREDIT_CARD'), dueDate: today }
+      {
+        method: 'CREDIT_CARD',
+        amount: remainingForNewPart > 0 ? formatBRL(remainingForNewPart) : '',
+        installments: defaultInstallments(pricing, 'CREDIT_CARD'),
+        dueDate: today,
+        interest: defaultInterest
+      }
     ]);
 
   const submit = async () => {
@@ -293,7 +365,13 @@ const Composer: React.FC<{
     setServerError('');
     if (errors.length || blocked) return;
     setSending(true);
-    const result = await salesApi.createSale({ attendeeId: attendee.id, offerId: offer.id, closerName, parts: drafts });
+    const result = await salesApi.createSale({
+      attendeeId: attendee.id,
+      offerId: product.id,
+      closerName,
+      parts: drafts,
+      ...(custom ? { custom: { name: name.trim(), totalCents: total } } : {})
+    });
     setSending(false);
     if (result.error) setServerError(result.error);
     else if (result.saleId) onCreated(result.saleId);
@@ -305,17 +383,68 @@ const Composer: React.FC<{
         <ArrowLeft className="w-3.5 h-3.5" /> Propostas
       </button>
 
-      <div className="rounded-2xl bg-slate-900 text-white p-4">
-        <p className="text-xs font-semibold text-slate-300">{offer.name}</p>
-        <p className="text-2xl font-extrabold tracking-tight">{formatBRL(total)}</p>
-        <p className="text-xs text-emerald-300 font-semibold">Pix à vista (5% de desconto): {formatBRL(pixCashCents(total))}</p>
-        {offer.condition && <p className="text-xs text-slate-300 mt-1">{offer.condition}</p>}
-      </div>
+      {custom ? (
+        <div className="rounded-2xl border-2 border-slate-900 p-4 space-y-2.5">
+          <p className="text-xs font-extrabold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+            <SlidersHorizontal className="w-4 h-4" /> Proposta Custom
+          </p>
+          <label className="flex flex-col gap-1 text-[11px] font-bold text-slate-600">
+            Produto (define o contrato)
+            <select value={product.id} onChange={e => changeProduct(e.target.value)} className={inputClass}>
+              {products.map(o => (
+                <option key={o.id} value={o.id} disabled={openOfferIds.has(o.id)}>
+                  {o.name}
+                  {openOfferIds.has(o.id) ? ' (já tem proposta aberta)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] font-bold text-slate-600">
+            Nome da proposta (aparece na cobrança do cliente)
+            <input
+              value={name}
+              maxLength={80}
+              onChange={e => {
+                setName(e.target.value);
+                setNameTouched(true);
+              }}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] font-bold text-slate-600">
+            Valor total
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="R$ 0,00"
+              value={totalText}
+              onChange={e => changeTotal(formatCurrencyInput(e.target.value))}
+              className={inputClass}
+            />
+          </label>
+          <p className="text-[11px] text-slate-500">
+            Sem desconto automático: o cliente paga este total, mais os juros por parcela que você colocar. Até 14x em qualquer forma de pagamento.
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-2xl bg-slate-900 text-white p-4">
+          <p className="text-xs font-semibold text-slate-300">{offer.name}</p>
+          <p className="text-2xl font-extrabold tracking-tight">{formatBRL(total)}</p>
+          <p className="text-xs text-emerald-300 font-semibold">
+            Pix à vista ({discountPct}% de desconto): {formatBRL(pixCashCents(total, pricing))}
+          </p>
+          {typeof option === 'number' && <p className="text-xs text-slate-300">Cartão parcelado com ou sem juros ({formatBRL(option)} por parcela)</p>}
+          {offer.condition && <p className="text-xs text-slate-300 mt-1">{offer.condition}</p>}
+        </div>
+      )}
 
       <div className="space-y-3">
         {parts.map((part, i) => {
-          const max = maxInstallments(offer.id, part.method);
+          const max = maxInstallments(pricing, part.method);
           const draft = drafts[i];
+          const partCharge = charge(part, part.installments);
+          const withInterest = Number.isFinite(draft.amountCents) && draft.amountCents > 0 && partCharge > draft.amountCents;
+          const hasInterest = (draft.interestCents ?? 0) > 0;
           return (
             <div key={i} className="rounded-xl border border-slate-200 p-3 space-y-2.5">
               <div className="flex items-center justify-between">
@@ -331,7 +460,7 @@ const Composer: React.FC<{
                   <button
                     key={m}
                     type="button"
-                    onClick={() => update(i, { method: m, installments: m === part.method ? part.installments : m === 'PIX' ? 1 : maxInstallments(offer.id, m) })}
+                    onClick={() => update(i, { method: m, installments: m === part.method ? part.installments : defaultInstallments(pricing, m) })}
                     aria-pressed={part.method === m}
                     className={`py-2 rounded-lg text-xs font-bold transition ${part.method === m ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500'}`}
                   >
@@ -348,7 +477,7 @@ const Composer: React.FC<{
                     placeholder="R$ 0,00"
                     value={part.amount}
                     onChange={e => update(i, { amount: formatCurrencyInput(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-slate-900"
+                    className={inputClass}
                   />
                 </label>
                 {max === 1 ? (
@@ -359,21 +488,59 @@ const Composer: React.FC<{
                 ) : (
                   <label className="flex flex-col gap-1 text-[11px] font-bold text-slate-600">
                     Parcelas
-                    <select
-                      value={part.installments}
-                      onChange={e => update(i, { installments: Number(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-slate-900"
-                    >
-                      {Array.from({ length: max }, (_, n) => n + 1).map(n => (
-                        <option key={n} value={n}>
-                          {n}x
-                          {Number.isFinite(draft.amountCents) && draft.amountCents > 0
-                            ? ` de ${formatBRL(Math.round(withInterestCents(offer.id, { ...draft, installments: n }) / n))}`
-                            : ''}
-                          {hasCardInterest(offer.id, { method: part.method, installments: n }) ? ' (com juros)' : ''}
-                        </option>
-                      ))}
+                    <select value={part.installments} onChange={e => update(i, { installments: Number(e.target.value) })} className={inputClass}>
+                      {Array.from({ length: max }, (_, n) => n + 1).map(n => {
+                        const value = charge(part, n);
+                        const known = Number.isFinite(value) && value > 0;
+                        return (
+                          <option key={n} value={n}>
+                            {n}x
+                            {known ? ` de ${formatBRL(Math.round(value / n))}` : ''}
+                            {known && value > draft.amountCents ? ' (com juros)' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
+                  </label>
+                )}
+                {allowsFlatInterest(pricing, part) && typeof option === 'number' && (
+                  <div className="col-span-2 grid grid-cols-2 gap-1 p-1 rounded-xl bg-slate-100">
+                    {[
+                      { value: '', label: 'Sem juros', active: !hasInterest },
+                      { value: formatBRL(option), label: `Com juros (+${formatBRL(option)}/parcela)`, active: hasInterest }
+                    ].map(o => (
+                      <button
+                        key={o.label}
+                        type="button"
+                        onClick={() => update(i, { interest: o.value })}
+                        aria-pressed={o.active}
+                        className={`py-2 rounded-lg text-xs font-bold transition ${o.active ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500'}`}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {allowsFlatInterest(pricing, part) && option === 'ANY' && (
+                  <label className="col-span-2 flex flex-col gap-1 text-[11px] font-bold text-slate-600">
+                    Juros por parcela (vazio = sem juros)
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="Sem juros"
+                        value={part.interest}
+                        onChange={e => update(i, { interest: formatCurrencyInput(e.target.value) })}
+                        className={inputClass}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => update(i, { interest: formatBRL(4990) })}
+                        className="shrink-0 px-3 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                      >
+                        R$ 49,90
+                      </button>
+                    </div>
                   </label>
                 )}
                 <label className="col-span-2 flex flex-col gap-1 text-[11px] font-bold text-slate-600">
@@ -384,17 +551,22 @@ const Composer: React.FC<{
                     max={salesApi.maxDueDate()}
                     value={part.dueDate}
                     onChange={e => update(i, { dueDate: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-slate-900"
+                    className={inputClass}
                   />
                 </label>
               </div>
               {part.method === 'BOLETO' && <p className="text-[11px] text-slate-500">Boleto pago depois do vencimento tem multa de R$ 40.</p>}
-              {hasCardInterest(offer.id, part) && Number.isFinite(draft.amountCents) && draft.amountCents > 0 && (
+              {withInterest && (
                 <p className="text-[11px] font-semibold text-amber-800">
-                  Cartão em {part.installments}x tem juros: o cliente paga {formatBRL(withInterestCents(offer.id, draft))} nesta parte.
+                  {METHOD_LABELS[part.method]} em {part.installments}x com juros: o cliente paga {formatBRL(partCharge)} nesta parte ({part.installments}x de{' '}
+                  {formatBRL(Math.round(partCharge / part.installments))}).
                 </p>
               )}
-              {pixCash && <p className="text-[11px] font-semibold text-emerald-700">Pix à vista: total com 5% de desconto ({formatBRL(pixCashCents(total))}).</p>}
+              {pixCash && discountPct > 0 && (
+                <p className="text-[11px] font-semibold text-emerald-700">
+                  Pix à vista: total com {discountPct}% de desconto ({formatBRL(pixCashCents(total, pricing))}).
+                </p>
+              )}
             </div>
           );
         })}
@@ -420,7 +592,7 @@ const Composer: React.FC<{
         <span>{formatBRL(Math.abs(remaining))}</span>
       </div>
       {remaining === 0 && customerPays > total && (
-        <p className="text-xs font-bold text-slate-700 text-right">Cliente paga no total (com juros do cartão): {formatBRL(customerPays)}</p>
+        <p className="text-xs font-bold text-slate-700 text-right">Cliente paga no total (com juros): {formatBRL(customerPays)}</p>
       )}
 
       {tried && errors.length > 0 && (
@@ -448,7 +620,7 @@ const Composer: React.FC<{
 
 /** Propostas da pessoa: produtos para oferecer, montagem do pagamento e links gerados. */
 export const ProposalSheet: React.FC<ProposalSheetProps> = ({ attendee, salesApi, closerName, onClose }) => {
-  const [offer, setOffer] = useState<Offer | null>(null);
+  const [composer, setComposer] = useState<{ offer: Offer; custom: boolean } | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const { refreshBilling } = salesApi;
 
@@ -473,7 +645,11 @@ export const ProposalSheet: React.FC<ProposalSheetProps> = ({ attendee, salesApi
   const sales = salesApi.sales.filter(s => s.attendeeId === attendee.id && s.status !== 'CANCELLED');
   const cancelledCount = salesApi.sales.filter(s => s.attendeeId === attendee.id && s.status === 'CANCELLED').length;
   const offers = salesApi.offersFor(attendee.id);
+  const products = salesApi.productsFor(attendee.id);
   const openByOffer = new Map(sales.filter(s => isOpenSale(s.status)).map(s => [s.offerId, s.status]));
+  const openOfferIds = new Set(openByOffer.keys());
+  // A Custom abre no primeiro produto que ainda não tem proposta aberta
+  const customStart = products.find(o => !openOfferIds.has(o.id));
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center" role="dialog" aria-modal="true" aria-label={`Propostas para ${attendee.name}`}>
@@ -510,17 +686,20 @@ export const ProposalSheet: React.FC<ProposalSheetProps> = ({ attendee, salesApi
             </div>
           )}
 
-          {offer ? (
+          {composer ? (
             <Composer
-              offer={offer}
+              offer={composer.offer}
+              custom={composer.custom}
+              products={products}
+              openOfferIds={openOfferIds}
               attendee={attendee}
               salesApi={salesApi}
               closerName={closerName}
               blocked={blocked}
-              onBack={() => setOffer(null)}
+              onBack={() => setComposer(null)}
               onCreated={saleId => {
                 setHighlightId(saleId);
-                setOffer(null);
+                setComposer(null);
               }}
             />
           ) : (
@@ -536,7 +715,7 @@ export const ProposalSheet: React.FC<ProposalSheetProps> = ({ attendee, salesApi
 
               <section className="space-y-2">
                 <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Nova proposta</h3>
-                {offers.length === 0 ? (
+                {products.length === 0 ? (
                   <p className="text-sm text-slate-500">Nenhuma proposta disponível ainda. O admin precisa cadastrar os valores na tela Cobrança.</p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -548,11 +727,12 @@ export const ProposalSheet: React.FC<ProposalSheetProps> = ({ attendee, salesApi
                           key={o.id}
                           type="button"
                           disabled={already || blocked}
-                          onClick={() => setOffer(o)}
+                          onClick={() => setComposer({ offer: o, custom: false })}
                           className="text-left rounded-xl border border-slate-200 hover:border-slate-900 p-3.5 transition disabled:opacity-50 disabled:hover:border-slate-200"
                         >
                           <p className="text-sm font-extrabold text-slate-900">{o.name}</p>
                           <p className="text-xs font-semibold text-slate-600">{formatBRL(o.totalCents ?? 0)}</p>
+                          <p className="text-[11px] font-semibold text-emerald-700">Pix à vista {formatBRL(pixCashCents(o.totalCents ?? 0, o.id))}</p>
                           {already && (
                             <p className="text-[11px] font-bold text-amber-700 mt-1">
                               {openStatus && isClosedSale(openStatus) ? 'Já vendido' : 'Já tem proposta aberta'}
@@ -561,6 +741,18 @@ export const ProposalSheet: React.FC<ProposalSheetProps> = ({ attendee, salesApi
                         </button>
                       );
                     })}
+                    <button
+                      type="button"
+                      disabled={!customStart || blocked}
+                      onClick={() => customStart && setComposer({ offer: customStart, custom: true })}
+                      className="text-left rounded-xl border border-dashed border-slate-400 hover:border-slate-900 p-3.5 transition disabled:opacity-50 disabled:hover:border-slate-400"
+                    >
+                      <p className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                        <SlidersHorizontal className="w-4 h-4" /> Proposta Custom
+                      </p>
+                      <p className="text-xs font-semibold text-slate-600">Você define produto, nome, valor, parcelas e juros</p>
+                      {!customStart && <p className="text-[11px] font-bold text-amber-700 mt-1">Todos os produtos já têm proposta aberta</p>}
+                    </button>
                   </div>
                 )}
               </section>

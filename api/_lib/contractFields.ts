@@ -134,3 +134,20 @@ export function contractFields(offerId: string, totalCents: number, parts: PartD
   }
   return f;
 }
+
+/**
+ * Trechos fixos dos modelos que dependem da venda (trocados pelo texto exato): o desconto do
+ * à vista (5%, 10% no Elite, nenhum na Proposta Custom) e o cartão parcelado sem juros.
+ * Tudo sai do que foi cobrado (partes) contra o total, então vale também para vendas antigas.
+ */
+export function contractPhrases(totalCents: number, parts: PartDraft[]): Record<string, string> {
+  const charged = parts.reduce((acc, p) => acc + p.amountCents, 0);
+  if (isPixCash(parts)) {
+    const pct = totalCents > 0 ? Math.round((1 - charged / totalCents) * 100) : 0;
+    return { 'À vista com desconto de 5%.': pct > 0 ? `À vista com desconto de ${pct}%.` : 'À vista.' };
+  }
+  if (parts.length === 1 && parts[0].method === 'CREDIT_CARD' && parts[0].installments > 1 && charged <= totalCents) {
+    return { '(com juros da operadora)': '(sem juros)' };
+  }
+  return {};
+}

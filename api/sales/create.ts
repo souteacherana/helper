@@ -1,11 +1,13 @@
 /**
  * POST /api/sales/create — gera a venda e uma cobrança no Asaas por parte do pagamento.
- * Body: { attendeeId, offerId, closerName, parts: [{ method, amountCents, installments, dueDate }] }
+ * Body: { attendeeId, offerId, closerName, parts: [{ method, amountCents, installments, dueDate, interestCents? }],
+ *         custom?: { name, totalCents } }
  *
  * Tudo que vale dinheiro é conferido aqui, nunca confiado à tela: o total vem do produto no
  * banco, a divisão passa pelas mesmas regras da tela (src/lib/sales.ts) e a ficha de cobrança
  * precisa ter nome, CPF/CNPJ e e-mail. Se o Asaas recusar uma parte, as cobranças já criadas
  * são removidas e a venda fica como "Erro ao gerar".
+ * Na Proposta Custom (custom) o nome e o total vêm do closer; o produto define o contrato.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AsaasError, asaasClient, type AsaasClient } from '../_lib/asaas.js';
@@ -13,6 +15,9 @@ import { adminDb, json, teamRoleFromRequest } from '../_lib/server.js';
 import { refreshSaleStatus } from '../_lib/salesSync.js';
 import {
   BOLETO_FINE,
+  CUSTOM_PRICING,
+  MAX_CUSTOM_TOTAL_CENTS,
+  MIN_INSTALLMENT_CENTS,
   buildReference,
   fromCents,
   isOpenSale,
@@ -110,9 +115,21 @@ function readParts(raw: unknown): PartDraft[] | null {
       method: String(part.method) as PayMethod,
       amountCents: Number(part.amountCents),
       installments: Number(part.installments),
-      dueDate: String(part.dueDate ?? '')
+      dueDate: String(part.dueDate ?? ''),
+      interestCents: Number(part.interestCents ?? 0)
     };
   });
+}
+
+/** Proposta Custom: undefined = proposta normal, null = dados inválidos */
+function readCustom(raw: unknown): { name: string; totalCents: number } | null | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const custom = raw as Record<string, unknown>;
+  const name = typeof custom.name === 'string' ? custom.name.trim().replace(/\s+/g, ' ') : '';
+  const totalCents = Number(custom.totalCents);
+  if (name.length < 3 || name.length > 80) return null;
+  if (!Number.isInteger(totalCents) || totalCents < MIN_INSTALLMENT_CENTS || totalCents > MAX_CUSTOM_TOTAL_CENTS) return null;
+  return { name, totalCents };
 }
 
 export async function handleCreateSale(authorization: string | null, input: unknown, env: Env): Promise<ApiResult> {
@@ -124,18 +141,23 @@ export async function handleCreateSale(authorization: string | null, input: unkn
   const offerId = typeof body.offerId === 'string' ? body.offerId : '';
   const closerName = typeof body.closerName === 'string' ? body.closerName.trim().slice(0, 60) : '';
   const parts = readParts(body.parts);
+  const custom = readCustom(body.custom);
   if (!attendeeId || !offerId || !parts) return fail(400, 'Requisição inválida.');
+  if (custom === null) return fail(400, 'Proposta Custom: informe o nome (3 a 80 letras) e um total válido.');
   if (!closerName) return fail(400, 'Informe o nome do closer.');
 
   const { data: offer } = await db.from('offers').select('*').eq('id', offerId).maybeSingle();
-  if (!offer || !offer.active || offer.total_value === null) return fail(409, 'Esta proposta não está disponível.');
+  if (!offer || !offer.active || (!custom && offer.total_value === null)) return fail(409, 'Esta proposta não está disponível.');
   if (offer.restricted) {
     const { data: access } = await db.from('offer_access').select('attendee_id').eq('offer_id', offerId).eq('attendee_id', attendeeId).maybeSingle();
     if (!access) return fail(403, `${offer.name} não está liberado para esta pessoa.`);
   }
 
-  const totalCents = toCents(offer.total_value);
-  const problems = validateParts(totalCents, parts, todaySaoPaulo(), offerId);
+  // Na Custom as regras de parcelas, desconto e juros são as da CUSTOM_PRICING, não as do produto
+  const pricing = custom ? CUSTOM_PRICING : offerId;
+  const totalCents = custom ? custom.totalCents : toCents(offer.total_value);
+  const saleName: string = custom ? custom.name : offer.name;
+  const problems = validateParts(totalCents, parts, todaySaoPaulo(), pricing);
   if (problems.length) return fail(400, problems.join(' '));
 
   const [{ data: attendee }, { data: profile }, { data: openSales }] = await Promise.all([
@@ -166,7 +188,7 @@ export async function handleCreateSale(authorization: string | null, input: unkn
     .insert({
       attendee_id: attendeeId,
       offer_id: offerId,
-      offer_name: offer.name,
+      offer_name: saleName,
       total_value: fromCents(totalCents),
       closer_name: closerName,
       status: 'CREATING',
@@ -179,8 +201,8 @@ export async function handleCreateSale(authorization: string | null, input: unkn
     return fail(500, 'Não foi possível registrar a venda. Tente novamente.');
   }
   const saleId: string = sale.id;
-  // O que cada parte cobra de fato (cartão parcelado com juros); é isso que vai para o Asaas e fica gravado
-  const charged = parts.map(p => withInterestCents(offerId, p));
+  // O que cada parte cobra de fato (parcelado com juros); é isso que vai para o Asaas e fica gravado
+  const charged = parts.map(p => withInterestCents(pricing, p));
 
   await db.from('sale_parts').insert(
     parts.map((p, position) => ({
@@ -201,7 +223,7 @@ export async function handleCreateSale(authorization: string | null, input: unkn
         customer: customerId,
         billingType: p.method,
         dueDate: p.dueDate,
-        description: `${offer.name} • Imersão Rise 2026${label}`,
+        description: `${saleName} • Imersão Rise 2026${label}`,
         externalReference: buildReference(saleId, position),
         // Parcelado: o Asaas divide o total e acerta os centavos na última parcela
         ...(p.installments > 1 ? { installmentCount: p.installments, totalValue: fromCents(charged[position]) } : { value: fromCents(charged[position]) }),

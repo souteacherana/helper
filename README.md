@@ -4,6 +4,7 @@ Sistema de apoio ao evento **Imersão Rise 2026** (Espaço Altus, Barueri/SP —
 
 - **Dashboard** (`/dashboard`, closers e admin): todos os participantes numa tabela, com ingresso, perfil (mentorado, acompanhante, patrocinador, não mentorado), RISERS, presença dos dois dias, ICP, estilo, faturamento, WhatsApp, Instagram e respostas do formulário, filtros combináveis e, em cada pessoa, os botões **Cobrança** (proposta/cobrança no Asaas) e **Contrato** (D4Sign, depois que a entrada é paga).
 - **Closers**: ficha de vendas de cada participante (mentoria, pagamento, oferta, acompanhante), anotações de abordagem e mapa do salão.
+- **Propostas** (botão Cobrança): o closer divide o total do produto em até 4 partes (Pix, cartão, boleto) e gera os links no Asaas. Pix à vista tem 5% de desconto; no **Elite**, R$ 13.500 à vista ou R$ 15.000 em até 12x no cartão, com ou sem juros de R$ 49,90 por parcela. Na **Proposta Custom** o closer escolhe o produto (que define o contrato) e define nome, total, parcelas (até 14x) e juros por parcela.
 - **Recepção** (sem login): busca pelo nome, crachá a entregar e check-in do dia.
 - **Admin**: cadastro/edição, importação por planilha, equipe de closers, mapa (mesas e lugares), QR Codes dos crachás e zerar presenças.
 - **Crachá digital** (`/badge/<id>`): página pública aberta pelo QR Code impresso no crachá.

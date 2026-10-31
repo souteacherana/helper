@@ -9,6 +9,7 @@ import { AdminPage } from './pages/AdminPage';
 import { MapPage } from './pages/MapPage';
 import { QrSheetPage } from './pages/QrSheetPage';
 import { CobrancaPage } from './pages/CobrancaPage';
+import { DashboardPage } from './pages/DashboardPage';
 import { PublicBadgePage } from './pages/PublicBadgePage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { StatusToast } from './components/StatusToast';
@@ -41,6 +42,15 @@ export const App: React.FC = () => {
                 element={
                   <ProtectedRoute allowedRoles={['CLOSER', 'ADMIN']}>
                     <ClosersPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/dashboard"
+                element={
+                  <ProtectedRoute allowedRoles={['CLOSER', 'ADMIN']}>
+                    <DashboardPage />
                   </ProtectedRoute>
                 }
               />

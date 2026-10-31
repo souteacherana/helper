@@ -2,7 +2,7 @@
 
 Sistema de apoio ao evento **Imersão Rise 2026** (Espaço Altus, Barueri/SP — 31/10 e 01/11).
 
-- **Dashboard** (`/dashboard`, closers e admin): a lista de participantes do **Rise 360** (a mesma da aba Imersão Rise → Participantes: ingresso, perfil, convite do Mastermind, presença, ICP, estilo, WhatsApp, Instagram e respostas do formulário, com os mesmos filtros) e, em cada pessoa, os botões **Cobrança** (proposta/cobrança no Asaas) e **Contrato** (D4Sign, depois que a entrada é paga). A pessoa é ligada ao cadastro do HELPER pelo WhatsApp (e pelo nome).
+- **Dashboard** (`/dashboard`, closers e admin): a lista de participantes do **Rise 360** (a mesma da aba Imersão Rise → Participantes: ingresso, perfil, RISERS, presença, ICP, estilo, WhatsApp, Instagram e respostas do formulário, com os mesmos filtros) e, em cada pessoa, os botões **Cobrança** (proposta/cobrança no Asaas) e **Contrato** (D4Sign, depois que a entrada é paga). A pessoa é ligada ao cadastro do HELPER pelo WhatsApp (e pelo nome); quem está no HELPER e não no Rise (ou enquanto o Rise não está ligado) aparece com os dados e o ICP do HELPER.
 - **Closers**: ficha de vendas de cada participante (mentoria, pagamento, oferta, acompanhante), anotações de abordagem e mapa do salão.
 - **Recepção** (sem login): busca pelo nome, crachá a entregar e check-in do dia.
 - **Admin**: cadastro/edição, importação por planilha, equipe de closers, mapa (mesas e lugares), QR Codes dos crachás e zerar presenças.

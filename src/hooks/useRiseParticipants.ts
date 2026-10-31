@@ -11,6 +11,8 @@ export function useRiseParticipants() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [readAt, setReadAt] = useState<string | null>(null);
+  // false quando o servidor ainda não tem o RISE_LINK_TOKEN (a tela mostra só o cadastro do HELPER)
+  const [configured, setConfigured] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -23,6 +25,7 @@ export function useRiseParticipants() {
         body: '{}'
       });
       const body = (await res.json().catch(() => ({}))) as { participantes?: RiseParticipant[]; lidoEm?: string; error?: string };
+      setConfigured(res.status !== 503);
       if (!res.ok) throw new Error(body.error || `Erro ${res.status}`);
       setList(body.participantes ?? []);
       setReadAt(body.lidoEm ?? new Date().toISOString());
@@ -41,5 +44,5 @@ export function useRiseParticipants() {
     return () => window.clearInterval(t);
   }, [authReady, isTeam, load]);
 
-  return { list, loading, error, readAt, reload: load };
+  return { list, loading, error, readAt, configured, reload: load };
 }

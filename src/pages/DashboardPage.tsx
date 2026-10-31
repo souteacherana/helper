@@ -3,20 +3,24 @@ import { AlertTriangle, BadgeDollarSign, Check, FileSignature, Loader2, MessageC
 import { useApp } from '../context/AppContext';
 import { useSales } from '../hooks/useSales';
 import { useRiseParticipants } from '../hooks/useRiseParticipants';
+import { useIcp } from '../hooks/useIcp';
 import { ProposalSheet } from '../components/ProposalSheet';
 import { ContractSheet } from '../components/ContractSheet';
 import type { Attendee } from '../types/index';
 import { CONTRACT_STATUS_LABELS, SALE_STATUS_LABELS, isClosedSale, isOpenSale, type Sale } from '../lib/sales';
+import { RISERS_OFFER_ID } from '../lib/closerFilters';
 import {
   ICP_NIVEL,
   PERFIS,
   PILLAR_LABELS,
+  fromAttendee,
   icpColor,
   instagramDe,
   matchAttendees,
   norm,
   perfilDe,
   perfilNota,
+  waLink,
   type PerfilKey,
   type RiseParticipant
 } from '../lib/riseParticipants';
@@ -29,6 +33,7 @@ import {
 
 type Row = RiseParticipant & {
   attendee?: Attendee;
+  fromRise: boolean;
   d1: boolean;
   h1: string;
   d2: boolean;
@@ -87,7 +92,7 @@ function buildFilters(rows: Row[]): FilterDef[] {
           ['sem', 'sem perfil', r => !r.perfil]
         ])
     },
-    { key: 'mm', label: 'Convite Mastermind', options: yesNo(r => r.master_mind, '✉ recebe', 'não recebe') },
+    { key: 'mm', label: 'RISERS', options: yesNo(r => r.master_mind, '💎 é RISER', 'não é RISER') },
     {
       key: 'venda',
       label: 'Venda (HELPER)',
@@ -96,7 +101,8 @@ function buildFilters(rows: Row[]): FilterDef[] {
         ['aguardando', 'Aguardando entrada', r => !closedSale(r) && r.sales.some(s => s.status === 'PENDING' || s.status === 'CREATING')],
         ['sem', 'Sem proposta', r => r.sales.length === 0],
         ['contrato', 'Contrato enviado ou assinado', r => r.sales.some(s => s.contractStatus === 'SENT' || s.contractStatus === 'SIGNED')],
-        ['forahelper', 'Não está no HELPER', r => !r.attendee]
+        ['forahelper', 'Não está no HELPER', r => !r.attendee],
+        ['forarise', 'Não está no Rise', r => !r.fromRise]
       ]
     },
     { key: 'd1', label: 'Sábado (D1)', options: yesNo(r => r.d1, 'presente', 'ausente') },
@@ -140,7 +146,7 @@ const IcpTag: React.FC<{ n: number | null }> = ({ n }) =>
 const WaIcon: React.FC<{ whats: string }> = ({ whats }) =>
   whats ? (
     <a
-      href={`https://wa.me/${encodeURIComponent(whats)}`}
+      href={waLink(whats)}
       target="_blank"
       rel="noopener noreferrer"
       onClick={e => e.stopPropagation()}
@@ -205,6 +211,8 @@ export const DashboardPage: React.FC = () => {
   const { attendees, userSession } = useApp();
   const rise = useRiseParticipants();
   const salesApi = useSales();
+  const icpMap = useIcp();
+  const risers = salesApi.access.get(RISERS_OFFER_ID);
   const closerName = userSession.userName || (userSession.role === 'ADMIN' ? 'Admin' : 'Closer');
 
   const [f, setF] = useState<Record<string, string>>({});
@@ -227,22 +235,31 @@ export const DashboardPage: React.FC = () => {
 
   const rows = useMemo<Row[]>(() => {
     const matched = matchAttendees(rise.list, attendees);
-    return rise.list.map(p => {
-      const a = matched.get(p.id);
+    const inRise = new Set([...matched.values()].map(a => a.id));
+    // Quem está no HELPER e não veio do Rise (ou o Rise não respondeu) entra com os dados do HELPER
+    const list: [RiseParticipant, Attendee | undefined, boolean][] = [
+      ...rise.list.map(p => [p, matched.get(p.id), true] as [RiseParticipant, Attendee | undefined, boolean]),
+      ...attendees.filter(a => !inRise.has(a.id)).map(a => [fromAttendee(a, icpMap.get(a.id)), a, false] as [RiseParticipant, Attendee, boolean])
+    ];
+    return list.map(([p, a, fromRise]) => {
       const ci = a?.checkIns;
+      const insta = instagramDe(p);
       return {
         ...p,
+        // Coluna RISERS: convite marcado no Rise ou acesso à oferta RISERS no HELPER
+        master_mind: p.master_mind || (!!a && !!risers?.has(a.id)),
         attendee: a,
+        fromRise,
         d1: !!(p.presente_d1 || ci?.day1),
         h1: hora(ci?.day1) || (p.hora_d1 && p.hora_d1.length <= 5 ? p.hora_d1 : ''),
         d2: !!(p.presente_d2 || ci?.day2),
         h2: hora(ci?.day2) || (p.hora_d2 && p.hora_d2.length <= 5 ? p.hora_d2 : ''),
-        insta: instagramDe(p),
+        insta: insta.length || !a?.instagram ? insta : instagramDe({ respostas: [{ p: 'Instagram', r: a.instagram }] }),
         perfil: perfilDe(p),
         sales: a ? salesByAttendee.get(a.id) ?? [] : []
       };
     });
-  }, [rise.list, attendees, salesByAttendee]);
+  }, [rise.list, attendees, salesByAttendee, icpMap, risers]);
 
   // Mantém o detalhe aberto em dia com as vendas/presença
   useEffect(() => {
@@ -272,7 +289,7 @@ export const DashboardPage: React.FC = () => {
     });
 
   const kpis: [string, string | number, string][] = [
-    ['Participantes', rows.length, `${count(r => r.ingresso === 'VIP')} VIP · ${count(r => r.ingresso === 'SILVER')} SILVER · ${count(r => r.master_mind)} ✉ Mastermind`],
+    ['Participantes', rows.length, `${count(r => r.ingresso === 'VIP')} VIP · ${count(r => r.ingresso === 'SILVER')} SILVER · ${count(r => r.master_mind)} 💎 RISERS`],
     ['Presentes no sábado', count(r => r.d1), `${count(r => r.d2)} no domingo`],
     ['Responderam o formulário', count(r => r.icp != null), `${count(r => r.icp == null)} sem formulário`],
     ['ICP 1–3 (perfil Elite)', count(r => r.icp != null && r.icp <= 3), `${count(r => r.icp != null && r.icp <= 3 && r.perfil === 'mentorado')} mentorados`],
@@ -329,11 +346,21 @@ export const DashboardPage: React.FC = () => {
         </button>
       </div>
 
-      {rise.error && (
-        <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+      {!rise.configured ? (
+        <div className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{rise.error}</span>
+          <span>
+            A lista do Rise ainda não está ligada (falta o <b>RISE_LINK_TOKEN</b> no Vercel). Por enquanto aparece o cadastro do HELPER, com o ICP do
+            HELPER; Cobrança e Contrato funcionam normalmente.
+          </span>
         </div>
+      ) : (
+        rise.error && (
+          <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{rise.error} Mostrando o cadastro do HELPER enquanto isso.</span>
+          </div>
+        )
       )}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
@@ -405,7 +432,7 @@ export const DashboardPage: React.FC = () => {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        {rise.loading && !rows.length ? (
+        {rise.loading && !rise.readAt && !rise.error ? (
           <div className="flex items-center justify-center gap-2 p-10 text-sm text-slate-500">
             <Loader2 className="h-4 w-4 animate-spin" /> Lendo o Rise…
           </div>
@@ -413,7 +440,7 @@ export const DashboardPage: React.FC = () => {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-[11px] uppercase tracking-wider text-slate-500">
-                {['Nome', 'WhatsApp', 'Instagram', 'Ingresso', 'Perfil', 'Mastermind', 'D1 sáb', 'D2 dom', 'ICP', 'Estilo', 'Faturamento', 'Direção', 'Venda', ''].map(h => (
+                {['Nome', 'WhatsApp', 'Instagram', 'Ingresso', 'Perfil', 'RISERS', 'D1 sáb', 'D2 dom', 'ICP', 'Estilo', 'Faturamento', 'Direção', 'Venda', ''].map(h => (
                   <th key={h} className="whitespace-nowrap px-3 py-2.5 font-bold">
                     {h}
                   </th>
@@ -446,7 +473,7 @@ export const DashboardPage: React.FC = () => {
                       {perfilNota(r) && <div className="mt-1 text-[11px] text-slate-500">{perfilNota(r)}</div>}
                     </td>
                     <td className="px-3 py-2.5">
-                      {r.master_mind ? <Pill className="bg-[#1F2A44] border-[#1F2A44] text-white">✉ Convidado</Pill> : <span className="text-slate-400">—</span>}
+                      {r.master_mind ? <Pill className="bg-violet-600 border-violet-600 text-white">💎 RISER</Pill> : <span className="text-slate-400">—</span>}
                     </td>
                     <td className="px-3 py-2.5">
                       <Presence on={r.d1} h={r.h1} />
@@ -485,15 +512,16 @@ export const DashboardPage: React.FC = () => {
                 <h2 className="text-xl font-extrabold text-slate-900">{detail.nome}</h2>
                 <p className="mt-1 text-xs text-slate-500">
                   {[detail.ingresso, detail.referencia].filter(Boolean).join(' · ')}
-                  {detail.perfil === 'mentorado' && ' · mentorado no Rise'}
-                  {detail.master_mind && ' · ✉ recebe o convite do Mastermind'}
+                  {detail.perfil === 'mentorado' && (detail.fromRise ? ' · mentorado no Rise' : ' · mentorado')}
+                  {detail.master_mind && ' · 💎 convidado para o RISERS'}
+                  {!detail.fromRise && ' · não está na lista do Rise'}
                 </p>
                 <p className="text-xs text-slate-500">
                   Sábado: {detail.d1 ? `✓ ${detail.h1}` : 'ausente'} · Domingo: {detail.d2 ? `✓ ${detail.h2}` : '—'}
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   {detail.whats && (
-                    <a href={`https://wa.me/${encodeURIComponent(detail.whats)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-full bg-[#25D366] px-3 py-1 text-xs font-bold text-white">
+                    <a href={waLink(detail.whats)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-full bg-[#25D366] px-3 py-1 text-xs font-bold text-white">
                       <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
                     </a>
                   )}

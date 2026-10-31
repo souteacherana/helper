@@ -3,6 +3,7 @@
  * "Participantes" do Rise: perfil, Instagram, WhatsApp, filtros e níveis de ICP.
  */
 import type { Attendee } from '../types/index';
+import type { Icp } from './icp';
 
 export interface RiseIcpPillar {
   r?: string;
@@ -128,6 +129,39 @@ export function phoneKey(raw: string | null | undefined): string {
   d = d.replace(/^0+/, '');
   if (d.length === 11 && d[2] === '9') d = d.slice(0, 2) + d.slice(3);
   return d.length === 10 ? d : String(raw ?? '').replace(/\D/g, '');
+}
+
+/** Link do WhatsApp: só dígitos e com o 55 na frente quando o número veio só com DDD */
+export function waLink(raw: string): string {
+  const d = String(raw ?? '').replace(/\D/g, '');
+  return `https://wa.me/${d.length === 10 || d.length === 11 ? '55' + d : d}`;
+}
+
+/**
+ * Pessoa que está no HELPER e não veio do Rise (ou o Rise ainda não está ligado): monta a linha
+ * com o cadastro e o ICP do próprio HELPER, para os botões de Cobrança e Contrato continuarem à mão.
+ */
+export function fromAttendee(a: Attendee, icp?: Icp): RiseParticipant {
+  const answers = icp ? Object.entries(icp.answers).filter(([, r]) => String(r ?? '').trim()) : [];
+  return {
+    id: `helper:${a.id}`,
+    nome: a.name,
+    ingresso: a.isSponsor ? 'PATROCINADOR' : a.level,
+    referencia: a.isSponsor ? 'Patrocinador' : '',
+    presente_d1: false,
+    hora_d1: null,
+    presente_d2: false,
+    hora_d2: null,
+    master_mind: false,
+    acompanhante: false,
+    icp: icp?.level ?? null,
+    estilo: icp?.disc ?? '',
+    respondido_em: null,
+    whats: a.phone,
+    mentorado: a.isMentee,
+    icp_detalhe: icp?.answers.Faturamento ? { faturamento: { r: icp.answers.Faturamento } } : {},
+    respostas: answers.map(([p, r]) => ({ p, r }))
+  };
 }
 
 /**

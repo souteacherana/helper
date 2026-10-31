@@ -143,6 +143,10 @@ export async function handleCreateSale(authorization: string | null, input: unkn
   const parts = readParts(body.parts);
   const custom = readCustom(body.custom);
   if (!attendeeId || !offerId || !parts) return fail(400, 'Requisição inválida.');
+  // Tela aberta antes dos preços novos (31/10) não manda os juros: pede para recarregar em vez de cobrar errado
+  if ((body.parts as unknown[]).some(p => !p || typeof p !== 'object' || !('interestCents' in p))) {
+    return fail(409, 'O HELPER foi atualizado. Recarregue a página e monte a proposta de novo.');
+  }
   if (custom === null) return fail(400, 'Proposta Custom: informe o nome (3 a 80 letras) e um total válido.');
   if (!closerName) return fail(400, 'Informe o nome do closer.');
 

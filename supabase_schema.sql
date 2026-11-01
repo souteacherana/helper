@@ -549,7 +549,7 @@ CREATE TABLE IF NOT EXISTS public.sale_parts (
   position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 9),
   method TEXT NOT NULL CHECK (method IN ('PIX', 'BOLETO', 'CREDIT_CARD')),
   amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
-  installments INTEGER NOT NULL DEFAULT 1 CHECK (installments BETWEEN 1 AND 12),
+  installments INTEGER NOT NULL DEFAULT 1 CHECK (installments BETWEEN 1 AND 14),
   due_date DATE NOT NULL,
   status TEXT NOT NULL DEFAULT 'PENDING'
     CHECK (status IN ('PENDING', 'PARTIAL', 'PAID', 'OVERDUE', 'CANCELLED', 'REFUNDED')),
@@ -561,6 +561,10 @@ CREATE TABLE IF NOT EXISTS public.sale_parts (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   PRIMARY KEY (sale_id, position)
 );
+
+-- RISERS (Mastermind) e Proposta Custom vão até 14x (bancos criados com o limite antigo de 12x)
+ALTER TABLE public.sale_parts DROP CONSTRAINT IF EXISTS sale_parts_installments_check;
+ALTER TABLE public.sale_parts ADD CONSTRAINT sale_parts_installments_check CHECK (installments BETWEEN 1 AND 14);
 
 ALTER TABLE public.offers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.offer_access ENABLE ROW LEVEL SECURITY;

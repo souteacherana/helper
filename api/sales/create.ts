@@ -208,7 +208,7 @@ export async function handleCreateSale(authorization: string | null, input: unkn
   // O que cada parte cobra de fato (parcelado com juros); é isso que vai para o Asaas e fica gravado
   const charged = parts.map(p => withInterestCents(pricing, p));
 
-  await db.from('sale_parts').insert(
+  const { error: partsError } = await db.from('sale_parts').insert(
     parts.map((p, position) => ({
       sale_id: saleId,
       position,
@@ -218,6 +218,12 @@ export async function handleCreateSale(authorization: string | null, input: unkn
       due_date: p.dueDate
     }))
   );
+  // Sem as partes gravadas, o pagamento no Asaas não teria onde ser registrado: não cria cobrança nenhuma
+  if (partsError) {
+    console.error('sale parts insert failed:', partsError);
+    await db.from('sales').update({ status: 'FAILED', error: partsError.message, updated_at: new Date().toISOString() }).eq('id', saleId);
+    return fail(500, 'Não foi possível registrar as partes da venda. Nenhuma cobrança foi criada; avise o admin.');
+  }
 
   const created: { kind: 'payments' | 'installments'; id: string }[] = [];
   try {

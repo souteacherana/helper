@@ -164,7 +164,7 @@ export const ContractSheet: React.FC<ContractSheetProps> = ({ attendee, salesApi
           <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 flex gap-2">
             <FileSignature className="w-4 h-4 shrink-0 text-slate-400" />
             <p>
-              O contrato é gerado sozinho quando a entrada é paga e vai pela D4Sign para o e-mail da ficha. A Ana e as testemunhas já vêm
+              Com a entrada paga, o contrato sai pelo botão de gerar e vai pela D4Sign para o e-mail da ficha. A Ana e as testemunhas já vêm
               pré-assinadas; só o cliente assina.
             </p>
           </div>

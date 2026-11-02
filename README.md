@@ -26,6 +26,7 @@ React + TypeScript + Vite + Tailwind, banco e autenticação no **Supabase**, ho
 | `BLOB_READ_WRITE_TOKEN` | scripts | só para subir fotos no Vercel Blob; o site não usa |
 | `D4SIGN_TOKEN_API`, `D4SIGN_CRYPT_KEY` | servidor | chave da API da D4Sign (contratos) |
 | `D4SIGN_SAFE_UUID` | servidor | cofre onde os contratos são criados ("Imersão Rise 2026") |
+| `CONTRACTS_AUTO` | servidor | `on` liga o envio automático do contrato quando a entrada é paga; sem ela, o contrato só sai pelo botão "Gerar e enviar contrato" |
 | `D4SIGN_TOKEN_API_2`, `D4SIGN_CRYPT_KEY_2`, `D4SIGN_SAFE_UUID_2`... | servidor | chaves extras em rodízio (até `_9`): quando uma bate o limite da D4Sign, o contrato sai pela próxima. Sem o cofre, usa o da chave 1 (chave da mesma conta) |
 
 Tudo que começa com `VITE_` vai para o código do site (é público). PINs e chaves secretas ficam **sem** esse prefixo.

@@ -52,8 +52,9 @@ export async function handleAsaasWebhook(token: string | null, input: unknown, e
   try {
     const db = adminDb(env);
     await syncSalePart(db, asaasClient(env), ref.saleId, ref.position);
-    // Entrada paga: o contrato é gerado e enviado em segundo plano (a resposta ao Asaas não espera)
-    if (await needsContract(db, ref.saleId)) {
+    // Entrada paga: o contrato é gerado e enviado em segundo plano (a resposta ao Asaas não espera),
+    // só quando o envio automático está ligado (CONTRACTS_AUTO=on)
+    if (await needsContract(db, env, ref.saleId)) {
       waitUntil(generateContract(db, env, ref.saleId).catch(e => console.error('contrato automático falhou:', e)));
     }
   } catch (err) {

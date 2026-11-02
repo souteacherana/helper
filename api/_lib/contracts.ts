@@ -150,8 +150,13 @@ export async function syncContract(db: SupabaseClient, env: Env, saleId: string)
   }
 }
 
-/** Venda com entrada paga e sem contrato ainda? (para disparar a geração sozinha) */
-export async function needsContract(db: SupabaseClient, saleId: string): Promise<boolean> {
+/**
+ * Venda com entrada paga e sem contrato ainda? (para disparar a geração sozinha)
+ * Envio automático desligado em 02/11 para revisão dos contratos: só volta com CONTRACTS_AUTO=on no servidor.
+ * Com ele desligado, o contrato sai pelo botão "Gerar contrato".
+ */
+export async function needsContract(db: SupabaseClient, env: Env, saleId: string): Promise<boolean> {
+  if (env.CONTRACTS_AUTO?.trim().toLowerCase() !== 'on') return false;
   const { data } = await db.from('sales').select('status, contract_status').eq('id', saleId).maybeSingle();
   return Boolean(data && (data.status === 'ENTRY_PAID' || data.status === 'PAID') && data.contract_status === 'NONE');
 }

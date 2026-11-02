@@ -21,7 +21,7 @@ export async function handleSyncSale(authorization: string | null, input: unknow
 
   try {
     await syncSale(db, asaasClient(env), saleId);
-    if (await needsContract(db, saleId)) {
+    if (await needsContract(db, env, saleId)) {
       waitUntil(generateContract(db, env, saleId).catch(e => console.error('contrato automático falhou:', e)));
     }
   } catch (err) {

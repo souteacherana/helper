@@ -49,7 +49,10 @@ async function fail(db: SupabaseClient, saleId: string, message: string) {
 }
 
 /** Gera e envia o contrato. Só uma execução por venda (a trava é o update condicional). */
-export async function generateContract(db: SupabaseClient, env: Env, saleId: string): Promise<{ ok?: true; error?: string }> {
+/**
+ * fileUrl: .docx pronto (revisado pela equipe) enviado como está, no lugar do modelo preenchido.
+ */
+export async function generateContract(db: SupabaseClient, env: Env, saleId: string, fileUrl?: string): Promise<{ ok?: true; error?: string }> {
   const { data: claimed } = await db
     .from('sales')
     .update({ contract_status: 'CREATING', contract_error: null, updated_at: new Date().toISOString() })
@@ -80,11 +83,11 @@ export async function generateContract(db: SupabaseClient, env: Env, saleId: str
       db.from('attendees').select('name, phone').eq('id', sale.attendee_id).maybeSingle(),
       db.from('billing_profiles').select('*').eq('attendee_id', sale.attendee_id).maybeSingle()
     ]);
-    if (!offer?.contract_template_url) return fail(db, saleId, `${sale.offer_name}: modelo de contrato não configurado.`);
+    if (!fileUrl && !offer?.contract_template_url) return fail(db, saleId, `${sale.offer_name}: modelo de contrato não configurado.`);
     if (!profile?.email) return fail(db, saleId, 'Ficha de cobrança sem e-mail: a D4Sign envia o contrato por e-mail.');
 
-    const res = await fetch(offer.contract_template_url);
-    if (!res.ok) return fail(db, saleId, `Não foi possível baixar o modelo de contrato (${res.status}).`);
+    const res = await fetch(fileUrl ?? offer!.contract_template_url);
+    if (!res.ok) return fail(db, saleId, `Não foi possível baixar o ${fileUrl ? 'arquivo do contrato' : 'modelo de contrato'} (${res.status}).`);
     const template = new Uint8Array(await res.arrayBuffer());
 
     const name = (profile.full_name || attendee?.name || '').trim();
@@ -101,7 +104,7 @@ export async function generateContract(db: SupabaseClient, env: Env, saleId: str
       { name, rg: profile.rg || '', cpf: profile.cpf || '', email: profile.email, phone: profile.phone || attendee?.phone || '' },
       new Date()
     );
-    const file = await fillTemplate(template, fields, contractPhrases(toCents(sale.total_value), drafts));
+    const file = fileUrl ? template : await fillTemplate(template, fields, contractPhrases(toCents(sale.total_value), drafts));
 
     let limitError: D4SignError | undefined;
     for (const key of keyRotation(keys, await lastKey(db))) {

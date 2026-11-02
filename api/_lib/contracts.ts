@@ -57,7 +57,8 @@ export async function generateContract(db: SupabaseClient, env: Env, saleId: str
     .from('sales')
     .update({ contract_status: 'CREATING', contract_error: null, updated_at: new Date().toISOString() })
     .eq('id', saleId)
-    .in('status', ['ENTRY_PAID', 'PAID'])
+    // Arquivo revisado (só admin) pode sair antes da entrada paga, a pedido da equipe
+    .in('status', fileUrl ? ['PENDING', 'ENTRY_PAID', 'PAID'] : ['ENTRY_PAID', 'PAID'])
     .in('contract_status', ['NONE', 'FAILED'])
     // '*': contract_key só existe depois da seção 11 atualizada do SQL
     .select('*');

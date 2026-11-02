@@ -150,6 +150,18 @@ export async function syncContract(db: SupabaseClient, env: Env, saleId: string)
   }
 }
 
+/** Cancela na D4Sign o contrato enviado e ainda não assinado (a venda e as cobranças não mudam). */
+export async function cancelContract(db: SupabaseClient, env: Env, saleId: string, reason: string): Promise<{ ok?: true; error?: string }> {
+  const { data: sale } = await db.from('sales').select('*').eq('id', saleId).maybeSingle();
+  if (!sale?.contract_uuid) return { error: 'Esta venda não tem contrato na D4Sign.' };
+  if (sale.contract_status === 'SIGNED') return { error: 'O contrato já foi assinado; não dá para cancelar pela D4Sign.' };
+  if (sale.contract_status === 'CANCELLED') return { ok: true };
+  await onDocument(d4signKeys(env), sale.contract_key, d4 => d4.cancel(sale.contract_uuid, reason));
+  const now = new Date().toISOString();
+  await db.from('sales').update({ contract_status: 'CANCELLED', updated_at: now }).eq('id', saleId);
+  return { ok: true };
+}
+
 /**
  * Venda com entrada paga e sem contrato ainda? (para disparar a geração sozinha)
  * Envio automático desligado em 02/11 para revisão dos contratos: só volta com CONTRACTS_AUTO=on no servidor.
